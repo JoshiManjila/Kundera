@@ -9,29 +9,35 @@ import java.math.BigInteger;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Date;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.GregorianCalendar;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
+import javax.persistence.Embedded;
 import javax.persistence.metamodel.Attribute;
 import javax.persistence.metamodel.EmbeddableType;
 import javax.xml.bind.DatatypeConverter;
 
+import org.eclipse.persistence.jpa.jpql.parser.CollectionExpression;
+import org.eclipse.persistence.jpa.jpql.parser.Expression;
+import org.eclipse.persistence.jpa.jpql.parser.StringLiteral;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.impetus.kundera.PersistenceProperties;
 import com.impetus.kundera.loader.ClientLoaderException;
-import com.impetus.kundera.loader.KunderaAuthenticationException;
 import com.impetus.kundera.metadata.model.EntityMetadata;
 import com.impetus.kundera.metadata.model.MetamodelImpl;
 import com.impetus.kundera.metadata.model.attributes.AbstractAttribute;
 import com.impetus.kundera.property.PropertyAccessorHelper;
 import com.impetus.kundera.utils.ReflectUtils;
 import com.mongodb.BasicDBObject;
-import com.mongodb.DB;
 import com.mongodb.DBObject;
+import com.mongodb.MongoCredential;
 
 /**
  * The Class MongoDBUtils.
@@ -70,7 +76,7 @@ public class MongoDBUtils
         // Iterator<Attribute> iter = compoundKey.getAttributes().iterator();
         BasicDBObject compoundKeyObj = new BasicDBObject();
 
-        compoundKeyObj = getCompoundKeyColumns(m, id, compoundKey);
+        compoundKeyObj = getCompoundKeyColumns(m, id, compoundKey, metaModel);
 
         dbObj.put("_id", compoundKeyObj);
     }
@@ -84,24 +90,39 @@ public class MongoDBUtils
      *            the id
      * @param compoundKey
      *            the compound key
+     * @param metaModel
      * @return the compound key columns
      */
-    public static BasicDBObject getCompoundKeyColumns(EntityMetadata m, Object id, EmbeddableType compoundKey)
+    public static BasicDBObject getCompoundKeyColumns(EntityMetadata m, Object id, EmbeddableType compoundKey,
+            MetamodelImpl metaModel)
     {
         BasicDBObject compoundKeyObj = new BasicDBObject();
+
+        Set<Attribute> attribs = compoundKey.getDeclaredAttributes();
+
         Field[] fields = m.getIdAttribute().getBindableJavaType().getDeclaredFields();
 
         // To ensure order.
-        for (Field f : fields)
+        for (Attribute attr : attribs)
         {
+            Field f = (Field) attr.getJavaMember();
             if (!ReflectUtils.isTransientOrStatic(f))
             {
-                Attribute compositeColumn = compoundKey.getAttribute(f.getName());
+                if (f.getAnnotation(Embedded.class) != null)
+                {
+                    EmbeddableType emb = metaModel.embeddable(f.getType());
+                    Object val = PropertyAccessorHelper.getObject(id, f);
+                    BasicDBObject dbVal = getCompoundKeyColumns(m, val, emb, metaModel);
+                    compoundKeyObj.put(((AbstractAttribute) attr).getJPAColumnName(), dbVal);
+                }
+                else
+                {
+                    compoundKeyObj.put(
+                            ((AbstractAttribute) attr).getJPAColumnName(),
+                            populateValue(PropertyAccessorHelper.getObject(id, (Field) attr.getJavaMember()),
+                                    ((AbstractAttribute) attr).getBindableJavaType()));
 
-                compoundKeyObj.put(
-                        ((AbstractAttribute) compositeColumn).getJPAColumnName(),
-                        populateValue(PropertyAccessorHelper.getObject(id, (Field) compositeColumn.getJavaMember()),
-                                ((AbstractAttribute) compositeColumn).getBindableJavaType()));
+                }
             }
         }
         return compoundKeyObj;
@@ -125,6 +146,22 @@ public class MongoDBUtils
         else if ((valObj instanceof Calendar) || (valObj instanceof GregorianCalendar))
         {
             return ((Calendar) valObj).getTime();
+        }
+        else if (CollectionExpression.class.isAssignableFrom(clazz))
+        {
+            CollectionExpression collExpr = (CollectionExpression) valObj;
+            List<String> texts = new ArrayList<String>(collExpr.childrenSize());
+
+            for (Expression childExpr : collExpr.orderedChildren())
+            {
+                if (childExpr instanceof StringLiteral)
+                {
+                    StringLiteral stringLiteral = (StringLiteral) childExpr;
+                    texts.add(stringLiteral.getUnquotedText());
+                }
+            }
+
+            return texts;
         }
         return valObj;
     }
@@ -165,57 +202,6 @@ public class MongoDBUtils
             value = PropertyAccessorHelper.fromSourceToTargetClass(targetClass, sourceClass, value);
         }
         return value;
-    }
-
-    /**
-     * Method to authenticate connection with mongodb. throws runtime error if:
-     * a) userName and password, any one is not null. b) if authentication
-     * fails.
-     * 
-     * 
-     * @param props
-     *            persistence properties.
-     * @param externalProperties
-     *            external persistence properties.
-     * @param mongoDB
-     *            mongo db connection.
-     */
-    public static void authenticate(Properties props, Map<String, Object> externalProperties, DB mongoDB)
-    {
-        String password = null;
-        String userName = null;
-        if (externalProperties != null)
-        {
-            userName = (String) externalProperties.get(PersistenceProperties.KUNDERA_USERNAME);
-            password = (String) externalProperties.get(PersistenceProperties.KUNDERA_PASSWORD);
-        }
-        if (userName == null)
-        {
-            userName = (String) props.get(PersistenceProperties.KUNDERA_USERNAME);
-        }
-        if (password == null)
-        {
-            password = (String) props.get(PersistenceProperties.KUNDERA_PASSWORD);
-        }
-        boolean authenticate = true;
-        String errMsg = null;
-        if (userName != null && password != null)
-        {
-            authenticate = mongoDB.authenticate(userName, password.toCharArray());
-        }
-        else if ((userName != null && password == null) || (userName == null && password != null))
-        {
-            errMsg = "Invalid configuration provided for authentication, please specify both non-nullable"
-                    + " 'kundera.username' and 'kundera.password' properties";
-            throw new ClientLoaderException(errMsg);
-        }
-
-        if (!authenticate)
-        {
-            errMsg = "Authentication failed, invalid 'kundera.username' :" + userName + "and 'kundera.password' :"
-                    + password + " provided";
-            throw new KunderaAuthenticationException(errMsg);
-        }
     }
 
     /**
@@ -278,4 +264,54 @@ public class MongoDBUtils
         byte[] digest = md.digest();
         return DatatypeConverter.printHexBinary(digest).toLowerCase();
     }
+
+    /**
+     * @param props
+     * @param externalProperties
+     * @return List of MongoCredential
+     */
+    public static List<MongoCredential> fetchCredentials(Properties props, Map<String, Object> externalProperties)
+    {
+        String password = null;
+        String userName = null;
+        String keyspace = null;
+        if (externalProperties != null)
+        {
+            userName = (String) externalProperties.get(PersistenceProperties.KUNDERA_USERNAME);
+            password = (String) externalProperties.get(PersistenceProperties.KUNDERA_PASSWORD);
+            keyspace = (String) externalProperties.get(PersistenceProperties.KUNDERA_KEYSPACE);
+        }
+        if (userName == null)
+        {
+            userName = (String) props.get(PersistenceProperties.KUNDERA_USERNAME);
+        }
+        if (password == null)
+        {
+            password = (String) props.get(PersistenceProperties.KUNDERA_PASSWORD);
+        }
+        if (keyspace == null)
+        {
+            keyspace = (String) props.get(PersistenceProperties.KUNDERA_KEYSPACE);
+        }
+
+        List<MongoCredential> credentials = new ArrayList<>();
+        if (userName != null && password != null)
+        {
+            MongoCredential credential = MongoCredential.createCredential(userName, keyspace, password.toCharArray());
+            credentials.add(credential);
+            return credentials;
+        }
+        else if (userName == null && password == null)
+        {
+            return credentials;
+        }
+        else
+        {
+            String errMsg = "Invalid configuration provided for authentication, please specify both non-nullable"
+                    + " 'kundera.username' and 'kundera.password' properties";
+            throw new ClientLoaderException(errMsg);
+        }
+
+    }
+
 }

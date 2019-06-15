@@ -17,16 +17,23 @@ package com.impetus.client.oraclenosql;
 
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
+import oracle.kv.AuthenticationFailureException;
 import oracle.kv.KVStore;
 import oracle.kv.KVStoreConfig;
 import oracle.kv.KVStoreFactory;
+import oracle.kv.PasswordCredentials;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.impetus.client.oraclenosql.config.OracleNoSQLPropertyReader;
 import com.impetus.client.oraclenosql.index.OracleNoSQLInvertedIndexer;
+import com.impetus.client.oraclenosql.schemamanager.OracleNoSQLSchemaManager;
+import com.impetus.client.oraclenosql.server.OracleNoSQLHostConfiguration;
+import com.impetus.client.oraclenosql.server.OracleNoSQLHost;
+import com.impetus.kundera.KunderaException;
 import com.impetus.kundera.PersistenceProperties;
 import com.impetus.kundera.client.Client;
 import com.impetus.kundera.configure.schema.api.SchemaManager;
@@ -35,6 +42,8 @@ import com.impetus.kundera.index.Indexer;
 import com.impetus.kundera.loader.ClientFactory;
 import com.impetus.kundera.loader.GenericClientFactory;
 import com.impetus.kundera.metadata.model.PersistenceUnitMetadata;
+import com.impetus.kundera.service.Host;
+import com.impetus.kundera.service.HostConfiguration;
 
 /**
  * {@link ClientFactory} implementation for Oracle NOSQL database
@@ -47,13 +56,22 @@ public class OracleNoSQLClientFactory extends GenericClientFactory
     /** The logger. */
     private static Logger logger = LoggerFactory.getLogger(OracleNoSQLClientFactory.class);
 
+    private HostConfiguration configuration;
+
     /** The kvstore db. */
     private KVStore kvStore;
 
     @Override
     public SchemaManager getSchemaManager(Map<String, Object> puProperties)
     {
-        return null;
+        if (schemaManager == null)
+        {
+            initializePropertyReader();
+            setExternalProperties(puProperties);
+            schemaManager = new OracleNoSQLSchemaManager(OracleNoSQLClientFactory.class.getName(), puProperties,
+                    kunderaMetadata);
+        }
+        return schemaManager;
     }
 
     @Override
@@ -61,6 +79,8 @@ public class OracleNoSQLClientFactory extends GenericClientFactory
     {
         initializePropertyReader();
         setExternalProperties(puProperties);
+        configuration = new OracleNoSQLHostConfiguration(externalProperties, OracleNoSQLPropertyReader.osmd,
+                getPersistenceUnit(), kunderaMetadata);
         reader = new OracleNoSQLEntityReader(kunderaMetadata);
     }
 
@@ -156,12 +176,18 @@ public class OracleNoSQLClientFactory extends GenericClientFactory
         String defaultPort = null;
         String storeName = null;
         String poolSize = null;
+        String userName = null;
+        String password = null;
+        
+
         if (externalProperties != null)
         {
             hostName = (String) externalProperties.get(PersistenceProperties.KUNDERA_NODES);
             defaultPort = (String) externalProperties.get(PersistenceProperties.KUNDERA_PORT);
             storeName = (String) externalProperties.get(PersistenceProperties.KUNDERA_KEYSPACE);
             poolSize = (String) externalProperties.get(PersistenceProperties.KUNDERA_POOL_SIZE_MAX_ACTIVE);
+            userName = (String) externalProperties.get(PersistenceProperties.KUNDERA_USERNAME);
+            password = (String) externalProperties.get(PersistenceProperties.KUNDERA_PASSWORD);
         }
 
         if (hostName == null)
@@ -181,8 +207,46 @@ public class OracleNoSQLClientFactory extends GenericClientFactory
         {
             poolSize = props.getProperty(PersistenceProperties.KUNDERA_POOL_SIZE_MAX_ACTIVE);
         }
-        return KVStoreFactory.getStore(new KVStoreConfig(storeName, hostName + ":" + defaultPort));
+        String[] hosts = new String[configuration.getHosts().size()];
+        int count = 0;
+
+        for (Host host : configuration.getHosts())
+        {
+            hosts[count] = host.getHost() + ":" + host.getPort();
+            count++;
+        }
+        
+        KVStoreConfig kconfig = new KVStoreConfig(storeName, hosts);
+        try
+        {
+
+            if (!((OracleNoSQLHostConfiguration)configuration).getSecurityProps().isEmpty())
+            {
+                
+                kconfig.setSecurityProperties(((OracleNoSQLHostConfiguration)configuration).getSecurityProps());
+                
+            }
+            
+            if (userName != null && password != null)
+            {
+                return KVStoreFactory
+                        .getStore(kconfig, new PasswordCredentials(userName, password.toCharArray()), null);
+            }
+        }
+        catch (AuthenticationFailureException afe)
+        {
+            /*
+             * Could potentially retry the login, possibly with different
+             * credentials, but in this simple example, we just fail the
+             * attempt.
+             */
+            throw new KunderaException("Could not authorize the client connection " + afe.getMessage());
+
+        }
+
+        return KVStoreFactory.getStore(kconfig);
     }
+
 
     @Override
     protected void initializeLoadBalancer(String loadBalancingPolicyName)

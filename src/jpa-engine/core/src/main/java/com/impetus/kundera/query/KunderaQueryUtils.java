@@ -17,6 +17,7 @@ package com.impetus.kundera.query;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
@@ -24,6 +25,8 @@ import java.util.Map;
 import javax.persistence.metamodel.EmbeddableType;
 import javax.persistence.metamodel.EntityType;
 
+import org.eclipse.persistence.jpa.jpql.parser.AbstractPathExpression;
+import org.eclipse.persistence.jpa.jpql.parser.AbstractSingleEncapsulatedExpression;
 import org.eclipse.persistence.jpa.jpql.parser.AggregateFunction;
 import org.eclipse.persistence.jpa.jpql.parser.BetweenExpression;
 import org.eclipse.persistence.jpa.jpql.parser.CollectionExpression;
@@ -37,13 +40,22 @@ import org.eclipse.persistence.jpa.jpql.parser.JPQLExpression;
 import org.eclipse.persistence.jpa.jpql.parser.KeywordExpression;
 import org.eclipse.persistence.jpa.jpql.parser.LikeExpression;
 import org.eclipse.persistence.jpa.jpql.parser.LogicalExpression;
+import org.eclipse.persistence.jpa.jpql.parser.LowerExpression;
+import org.eclipse.persistence.jpa.jpql.parser.NullComparisonExpression;
 import org.eclipse.persistence.jpa.jpql.parser.NumericLiteral;
+import org.eclipse.persistence.jpa.jpql.parser.OrExpression;
+import org.eclipse.persistence.jpa.jpql.parser.OrderByClause;
+import org.eclipse.persistence.jpa.jpql.parser.OrderByItem;
+import org.eclipse.persistence.jpa.jpql.parser.RegexpExpression;
+import org.eclipse.persistence.jpa.jpql.parser.SelectClause;
 import org.eclipse.persistence.jpa.jpql.parser.SelectStatement;
 import org.eclipse.persistence.jpa.jpql.parser.StateFieldPathExpression;
 import org.eclipse.persistence.jpa.jpql.parser.StringLiteral;
 import org.eclipse.persistence.jpa.jpql.parser.SubExpression;
 import org.eclipse.persistence.jpa.jpql.parser.UpdateStatement;
+import org.eclipse.persistence.jpa.jpql.parser.UpperExpression;
 import org.eclipse.persistence.jpa.jpql.parser.WhereClause;
+import org.eclipse.persistence.jpa.jpql.utility.iterable.ListIterable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,6 +106,62 @@ public final class KunderaQueryUtils
             }
         }
         return whereClause;
+    }
+
+    public static List<String> getSelectColumns(JPQLExpression jpqlExpression)
+    {
+        List<String> columns;
+        if (isSelectStatement(jpqlExpression))
+        {
+            columns = new ArrayList<>();
+            SelectClause k = (SelectClause) ((SelectStatement) jpqlExpression.getQueryStatement()).getSelectClause();
+
+            Expression selExp = k.getSelectExpression();
+
+            if (selExp instanceof StateFieldPathExpression)
+            {
+                if (selExp.toActualText().indexOf(".") > 0)
+                {
+                    columns.add(selExp.toActualText().split("[.]")[1]);
+                }
+            }
+            else if (selExp instanceof CollectionExpression)
+            {
+                CollectionExpression l = ((CollectionExpression) k.getSelectExpression());
+                ListIterable<Expression> list = l.children();
+                for (Expression exp : list)
+                {
+                    if (exp.toActualText().indexOf(".") > 0)
+                    {
+                        columns.add(exp.toActualText().split("[.]")[1]);
+                    }
+                }
+            }
+        }
+        else
+        {
+            logger.error("Not a select Query");
+            throw new KunderaException("Not a select Query");
+        }
+        return columns;
+    }
+
+    /**
+     * Gets the order by clause.
+     * 
+     * @param jpqlExpression
+     *            the jpql expression
+     * @return the order by clause
+     */
+    public static OrderByClause getOrderByClause(JPQLExpression jpqlExpression)
+    {
+        OrderByClause orderByClause = null;
+
+        if (hasOrderBy(jpqlExpression))
+        {
+            orderByClause = (OrderByClause) ((SelectStatement) jpqlExpression.getQueryStatement()).getOrderByClause();
+        }
+        return orderByClause;
     }
 
     /**
@@ -249,7 +317,7 @@ public final class KunderaQueryUtils
             {
                 return ip.getParameter();
             }
-         }
+        }
         else if (KeywordExpression.class.isAssignableFrom(exp.getClass()))
         {
             KeywordExpression keyWordExp = (KeywordExpression) exp;
@@ -304,7 +372,7 @@ public final class KunderaQueryUtils
         List<Map<String, Object>> columnsToOutput = new ArrayList<Map<String, Object>>();
         if (StateFieldPathExpression.class.isAssignableFrom(selectExpression.getClass()))
         {
-            StateFieldPathExpression sfpExp = (StateFieldPathExpression) selectExpression;
+            Expression sfpExp = selectExpression;
 
             addToOutputColumns(selectExpression, m, columnsToOutput, kunderaMetadata);
         }
@@ -336,7 +404,18 @@ public final class KunderaQueryUtils
     public static Map<String, Object> setFieldClazzAndColumnFamily(Expression expression, EntityMetadata m,
             final KunderaMetadata kunderaMetadata)
     {
-        StateFieldPathExpression sfpExp = (StateFieldPathExpression) expression;
+        AbstractPathExpression pathExp = null;
+
+        if (expression instanceof AbstractPathExpression) {
+            pathExp = (AbstractPathExpression) expression;
+
+        } else {
+            if (expression instanceof AbstractSingleEncapsulatedExpression) {
+                pathExp = (AbstractPathExpression) ((AbstractSingleEncapsulatedExpression) expression).getExpression();
+            }
+
+        }
+
         MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata().getMetamodel(
                 m.getPersistenceUnit());
 
@@ -345,37 +424,52 @@ public final class KunderaQueryUtils
         Class fieldClazz = String.class;
         String colFamily = m.getTableName();
         String colName = null;
-        String dbColName = null;
         Map<String, Object> map = new HashMap<String, Object>();
 
         boolean isEmbeddable = false;
+        boolean isAssociation = false;
         int count = 1;
-        String fieldName = sfpExp.getPath(count++);
+        String fieldName = pathExp.getPath(count++);
 
         AbstractAttribute attrib = (AbstractAttribute) entity.getAttribute(fieldName);
+        String dbColName = attrib.getJPAColumnName();
         isEmbeddable = metaModel.isEmbeddable(attrib.getBindableJavaType());
-        while (sfpExp.pathSize() > count)
+        isAssociation = attrib.isAssociation();
+        while (pathExp.pathSize() > count)
         {
             if (isEmbeddable)
             {
                 EmbeddableType embeddableType = metaModel.embeddable(attrib.getBindableJavaType());
-                String attName = sfpExp.getPath(count++);
+                String attName = pathExp.getPath(count++);
                 fieldName = fieldName + "." + attName;
                 attrib = (AbstractAttribute) embeddableType.getAttribute(attName);
                 isEmbeddable = metaModel.isEmbeddable(attrib.getBindableJavaType());
-
+                isAssociation = attrib.isAssociation();
+                dbColName += ("." + attrib.getJPAColumnName());
+            }
+            else if (isAssociation)
+            {
+                String attName = pathExp.getPath(count++);
+                fieldName = fieldName + "." + attName;
+                EntityType associatedType = metaModel.entity(attrib.getBindableJavaType());
+                attrib = (AbstractAttribute) associatedType.getAttribute(attName);
+                isEmbeddable = metaModel.isEmbeddable(attrib.getBindableJavaType());
+                isAssociation = attrib.isAssociation();
+                dbColName += ("." + attrib.getJPAColumnName());
             }
             colName = fieldName;
         }
 
-        if (!sfpExp.getPath(count - 1).equals(discriminatorColumn))
+        if (!pathExp.getPath(count - 1).equals(discriminatorColumn))
         {
             fieldClazz = attrib.getBindableJavaType();
             colFamily = attrib.getTableName() != null ? attrib.getTableName() : m.getTableName();
-            dbColName = attrib.getJPAColumnName();
             colName = colName != null ? colName : attrib.getJPAColumnName();
 
         }
+
+        boolean ignoreCase =
+              (expression instanceof UpperExpression) || (expression instanceof LowerExpression);
 
         map.put(Constants.FIELD_CLAZZ, fieldClazz);
         map.put(Constants.COL_FAMILY, colFamily);
@@ -383,6 +477,7 @@ public final class KunderaQueryUtils
         map.put(Constants.FIELD_NAME, fieldName);
         map.put(Constants.IS_EMBEDDABLE, isEmbeddable);
         map.put(Constants.DB_COL_NAME, dbColName);
+        map.put(Constants.IGNORE_CASE, ignoreCase);
         return map;
     }
 
@@ -405,6 +500,10 @@ public final class KunderaQueryUtils
         {
             onComparisonExpression(expression, m, kunderaMetadata, kunderaQuery);
         }
+        else if (NullComparisonExpression.class.isAssignableFrom(expression.getClass()))
+        {
+            onNullComparisonExpression(expression, m, kunderaMetadata, kunderaQuery);
+        }
         else if (LogicalExpression.class.isAssignableFrom(expression.getClass()))
         {
             onLogicalExpression(expression, m, kunderaMetadata, kunderaQuery);
@@ -416,6 +515,10 @@ public final class KunderaQueryUtils
         else if (LikeExpression.class.isAssignableFrom(expression.getClass()))
         {
             onLikeExpression(expression, m, kunderaMetadata, kunderaQuery);
+        }
+        else if (RegexpExpression.class.isAssignableFrom(expression.getClass()))
+        {
+            onRegExpression(expression, m, kunderaMetadata, kunderaQuery);
         }
         else if (BetweenExpression.class.isAssignableFrom(expression.getClass()))
         {
@@ -454,16 +557,18 @@ public final class KunderaQueryUtils
             KunderaMetadata kunderaMetadata, KunderaQuery kunderaQuery)
     {
         BetweenExpression betweenExp = (BetweenExpression) expression;
-        StateFieldPathExpression sfpExp = (StateFieldPathExpression) betweenExp.getExpression();
+        Expression sfpExp = betweenExp.getExpression();
 
         Map<String, Object> map = KunderaQueryUtils.setFieldClazzAndColumnFamily(sfpExp, m, kunderaMetadata);
         String columnName = (String) map.get(Constants.COL_NAME);
         String fieldName = (String) map.get(Constants.FIELD_NAME);
-        kunderaQuery.addFilterClause(columnName, Expression.GREATER_THAN_OR_EQUAL, betweenExp.getLowerBoundExpression()
-                .toActualText(), fieldName);
+        kunderaQuery.addFilterClause(
+              columnName, Expression.GREATER_THAN_OR_EQUAL, betweenExp.getLowerBoundExpression().toActualText(),
+              fieldName, (Boolean) map.get(Constants.IGNORE_CASE));
         kunderaQuery.addFilterClause("AND");
-        kunderaQuery.addFilterClause(columnName, Expression.LOWER_THAN_OR_EQUAL, betweenExp.getUpperBoundExpression()
-                .toActualText(), fieldName);
+        kunderaQuery.addFilterClause(
+              columnName, Expression.LOWER_THAN_OR_EQUAL, betweenExp.getUpperBoundExpression().toActualText(),
+              fieldName, (Boolean) map.get(Constants.IGNORE_CASE));
 
         return map;
 
@@ -480,12 +585,39 @@ public final class KunderaQueryUtils
             KunderaMetadata kunderaMetadata, KunderaQuery kunderaQuery)
     {
         LikeExpression likeExp = (LikeExpression) expression;
-        StateFieldPathExpression sfpExp = (StateFieldPathExpression) likeExp.getStringExpression();
+        Expression sfpExp = likeExp.getStringExpression();
         Map<String, Object> map = KunderaQueryUtils.setFieldClazzAndColumnFamily(sfpExp, m, kunderaMetadata);
-        kunderaQuery.addFilterClause((String) map.get(Constants.COL_NAME), likeExp.getIdentifier(), likeExp
-                .getPatternValue().toActualText(), (String) map.get(Constants.FIELD_NAME));
+        kunderaQuery.addFilterClause(
+              (String) map.get(Constants.COL_NAME), likeExp.getIdentifier(), likeExp.getPatternValue().toActualText(),
+              (String) map.get(Constants.FIELD_NAME), (Boolean) map.get(Constants.IGNORE_CASE));
         return map;
 
+    }
+
+    /**
+     * On reg expression.
+     * 
+     * @param expression
+     *            the expression
+     * @param m
+     *            the m
+     * @param kunderaMetadata
+     *            the kundera metadata
+     * @param kunderaQuery
+     *            the kundera query
+     * @return the map
+     */
+    public static Map<String, Object> onRegExpression(Expression expression, EntityMetadata m,
+            KunderaMetadata kunderaMetadata, KunderaQuery kunderaQuery)
+    {
+        RegexpExpression regExp = (RegexpExpression) expression;
+        Expression sfpExp = regExp.getStringExpression();
+        Map<String, Object> map = KunderaQueryUtils.setFieldClazzAndColumnFamily(sfpExp, m, kunderaMetadata);
+        kunderaQuery.addFilterClause(
+              (String) map.get(Constants.COL_NAME), regExp.getActualRegexpIdentifier().toUpperCase(),
+              regExp.getPatternValue().toActualText(), (String) map.get(Constants.FIELD_NAME),
+              (Boolean) map.get(Constants.IGNORE_CASE));
+        return map;
     }
 
     /**
@@ -502,9 +634,31 @@ public final class KunderaQueryUtils
     public static void onLogicalExpression(Expression expression, EntityMetadata m, KunderaMetadata kunderaMetadata,
             KunderaQuery kunderaQuery)
     {
+        if (expression instanceof OrExpression)
+        {
+            kunderaQuery.addFilterClause("(");
+        }
+
         traverse(((LogicalExpression) expression).getLeftExpression(), m, kunderaMetadata, kunderaQuery, false);
+
+        if (expression instanceof OrExpression)
+        {
+            kunderaQuery.addFilterClause(")");
+        }
+
         kunderaQuery.addFilterClause(((LogicalExpression) expression).getIdentifier());
+
+        if (expression instanceof OrExpression)
+        {
+            kunderaQuery.addFilterClause("(");
+        }
+
         traverse(((LogicalExpression) expression).getRightExpression(), m, kunderaMetadata, kunderaQuery, false);
+
+        if (expression instanceof OrExpression)
+        {
+            kunderaQuery.addFilterClause(")");
+        }
     }
 
     /**
@@ -525,10 +679,11 @@ public final class KunderaQueryUtils
             KunderaMetadata kunderaMetadata, KunderaQuery kunderaQuery)
     {
         InExpression inExp = (InExpression) expression;
-        StateFieldPathExpression sfpExp = (StateFieldPathExpression) inExp.getExpression();
+        Expression sfpExp = inExp.getExpression();
         Map<String, Object> map = KunderaQueryUtils.setFieldClazzAndColumnFamily(sfpExp, m, kunderaMetadata);
-        kunderaQuery.addFilterClause((String) map.get(Constants.COL_NAME), inExp.getIdentifier(), inExp.getInItems(),
-                (String) map.get(Constants.FIELD_NAME));
+        kunderaQuery.addFilterClause(
+              (String) map.get(Constants.COL_NAME), inExp.getIdentifier(), inExp.getInItems(),
+              (String) map.get(Constants.FIELD_NAME), (Boolean) map.get(Constants.IGNORE_CASE));
         return map;
     }
 
@@ -552,14 +707,76 @@ public final class KunderaQueryUtils
         ComparisonExpression compExp = (ComparisonExpression) expression;
 
         String condition = compExp.getIdentifier();
-        StateFieldPathExpression sfpExp = (StateFieldPathExpression) compExp.getLeftExpression();
+        Expression sfpExp = compExp.getLeftExpression();
         Map<String, Object> map = KunderaQueryUtils.setFieldClazzAndColumnFamily(sfpExp, m, kunderaMetadata);
         Object value = KunderaQueryUtils.getValue(compExp.getRightExpression(), (Class) map.get(Constants.FIELD_CLAZZ),
                 kunderaQuery);
-        kunderaQuery.addFilterClause((String) map.get(Constants.COL_NAME), condition, value,
-                (String) map.get(Constants.FIELD_NAME));
+        kunderaQuery.addFilterClause(
+              (String) map.get(Constants.COL_NAME), condition, value,
+              (String) map.get(Constants.FIELD_NAME), (Boolean) map.get(Constants.IGNORE_CASE));
         return map;
 
     }
 
+    /**
+     * On null-comparison expression.
+     *
+     * @param expression
+     *            the expression
+     * @param m
+     *            the m
+     * @param idColumn
+     *            the id column
+     * @param isIdColumn
+     *            the is id column
+     * @return
+     * @return the filter
+     */
+    public static Map<String, Object> onNullComparisonExpression(Expression expression, EntityMetadata m,
+                                                                 KunderaMetadata kunderaMetadata, KunderaQuery kunderaQuery)
+    {
+        NullComparisonExpression compExp = (NullComparisonExpression) expression;
+
+        String condition = compExp.getIdentifier();
+        Expression sfpExp = compExp.getExpression();
+        Map<String, Object> map = KunderaQueryUtils.setFieldClazzAndColumnFamily(sfpExp, m, kunderaMetadata);
+        kunderaQuery.addFilterClause(
+              (String) map.get(Constants.COL_NAME), condition, null,
+              (String) map.get(Constants.FIELD_NAME), (Boolean) map.get(Constants.IGNORE_CASE));
+        return map;
+
+    }
+
+    /**
+     * Gets the order by items.
+     * 
+     * @param jpqlExpression
+     *            the jpql expression
+     * @return the order by items
+     */
+    public static List<OrderByItem> getOrderByItems(JPQLExpression jpqlExpression)
+    {
+        List<OrderByItem> orderList = new LinkedList<>();
+
+        if (hasOrderBy(jpqlExpression))
+        {
+            Expression orderByItems = getOrderByClause(jpqlExpression).getOrderByItems();
+
+            if (orderByItems instanceof CollectionExpression)
+            {
+                ListIterator<Expression> iterator = orderByItems.children().iterator();
+                while (iterator.hasNext())
+                {
+                    OrderByItem orderByItem = (OrderByItem) iterator.next();
+                    orderList.add(orderByItem);
+                }
+            }
+            else
+            {
+                orderList.add((OrderByItem) orderByItems);
+            }
+        }
+
+        return orderList;
+    }
 }

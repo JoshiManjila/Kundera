@@ -2,9 +2,9 @@
 	<modelVersion>4.0.0</modelVersion>
 
 	<parent>
- 	        <groupId>com.impetus.kundera.core</groupId>
-                <artifactId>core-parent</artifactId>
-		<version>3.0-SNAPSHOT</version>
+		<groupId>com.impetus.kundera.core</groupId>
+		<artifactId>core-parent</artifactId>
+		<version>3.14-SNAPSHOT</version>
 	</parent>
 
 	<groupId>com.impetus.kundera.core</groupId>
@@ -12,9 +12,9 @@
 	<packaging>jar</packaging>
 	<name>kundera-fallback-impl</name>
 	<url>http://maven.apache.org</url>
-	
+
 	<properties>
-		<lucene.version>4.10.2</lucene.version>
+		<lucene.version>5.5.0</lucene.version>
 	</properties>
 
 	<dependencies>
@@ -38,13 +38,6 @@
 			<type>test-jar</type>
 			<scope>test</scope>
 		</dependency>
-
-		<dependency>
-			<groupId>net.sf.ehcache</groupId>
-			<artifactId>ehcache-core</artifactId>
-			<version>2.5.2</version>
-		</dependency>
-
 		<dependency>
 			<groupId>org.apache.lucene</groupId>
 			<artifactId>lucene-core</artifactId>
@@ -93,7 +86,7 @@
 		<dependency>
 			<groupId>com.google.guava</groupId>
 			<artifactId>guava</artifactId>
-			<version>13.0.1</version>
+			<version>18.0</version>
 		</dependency>
 		<dependency>
 			<groupId>javax.transaction</groupId>
@@ -158,8 +151,28 @@
 					</execution>
 				</executions>
 			</plugin>
-
 		</plugins>
 	</build>
+	  <profiles>
+  <profile>
+    <id>doclint-java8-disable</id>
+    <activation>
+      <jdk>[1.8,)</jdk>
+    </activation>
+
+    <build>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-javadoc-plugin</artifactId>
+          <configuration>
+            <additionalparam>-Xdoclint:none</additionalparam>
+          </configuration>
+        </plugin>
+      </plugins>
+    </build>
+  </profile>
+</profiles>
+	
 
 </project>

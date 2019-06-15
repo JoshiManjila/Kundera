@@ -64,7 +64,6 @@ import com.impetus.client.crud.PersonCassandra.Day;
 import com.impetus.kundera.PersistenceProperties;
 import com.impetus.kundera.client.Client;
 import com.impetus.kundera.client.cassandra.persistence.CassandraCli;
-import com.impetus.kundera.persistence.CriteriaQueryTranslator;
 import com.impetus.kundera.property.PropertyAccessorFactory;
 
 /**
@@ -442,12 +441,11 @@ public class PersonCassandraTest extends BaseTest
 
         CriteriaBuilder criteriaBuilder = entityManager.getCriteriaBuilder();
 
-        CriteriaQuery<Long> personQuery = criteriaBuilder.createQuery(Long.class);
+        CriteriaQuery<Object> personQuery = criteriaBuilder.createQuery(Object.class);
         Root<PersonCassandra> from = personQuery.from(PersonCassandra.class);
         personQuery.select(criteriaBuilder.count((Expression<?>) from.alias("p")));
-        String actual = CriteriaQueryTranslator.translate(personQuery);
 
-        Query q = entityManager.createQuery(actual);
+        Query q = entityManager.createQuery(personQuery);
         List noOfRows = q.getResultList();
 
         if (USE_CQL)
@@ -472,7 +470,6 @@ public class PersonCassandraTest extends BaseTest
         }
         tc.setCqlVersion(CassandraConstants.CQL_VERSION_2_0);
     }
-
     /**
      * Test count result.
      */

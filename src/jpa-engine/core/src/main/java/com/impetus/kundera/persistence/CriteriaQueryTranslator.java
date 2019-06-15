@@ -33,6 +33,7 @@ import javax.persistence.metamodel.Attribute;
 import org.apache.commons.lang.StringUtils;
 
 import com.impetus.kundera.Constants;
+import com.impetus.kundera.metadata.model.attributes.AbstractAttribute;
 import com.impetus.kundera.persistence.AbstractPredicate.ConditionalOperator;
 import com.impetus.kundera.query.KunderaQuery.SortOrder;
 
@@ -41,7 +42,7 @@ import com.impetus.kundera.query.KunderaQuery.SortOrder;
  * 
  * @author vivek.mishra
  */
-public final class CriteriaQueryTranslator
+final class CriteriaQueryTranslator
 {
 
     static Map<ConditionalOperator, String> conditions = new HashMap<AbstractPredicate.ConditionalOperator, String>();
@@ -64,7 +65,7 @@ public final class CriteriaQueryTranslator
      * 
      * @return JPQL string.
      */
-    public static <S> String translate(CriteriaQuery criteriaQuery)
+    static <S> String translate(CriteriaQuery criteriaQuery)
     {
         QueryBuilder builder = new CriteriaQueryTranslator.QueryBuilder();
 
@@ -138,18 +139,11 @@ public final class CriteriaQueryTranslator
 
         List<Order> orderings = criteriaQuery.getOrderList();
 
-        if (orderings != null)
+        if (orderings != null && !orderings.isEmpty())
         {
-            if (!orderings.isEmpty())
-            {
-                builder.appendOrderClause(where == null);
-            }
-
-            for (Order order : orderings)
-            {
-                builder.appendAlias(from.getAlias() != null ? from.getAlias() : select.getAlias());
-                builder.appendOrdering(order);
-            }
+            builder.appendOrderClause(where == null);
+            String alias = from.getAlias() != null ? from.getAlias() : select.getAlias();
+            builder.appendMultiOrdering(orderings, alias);
         }
         return builder.getQuery();
 
@@ -174,7 +168,7 @@ public final class CriteriaQueryTranslator
         {
             this.builder.append(aggregation);
             return this;
-            
+
         }
 
         public String getQuery()
@@ -205,6 +199,20 @@ public final class CriteriaQueryTranslator
             this.builder.append(Constants.SPACE);
             return this;
 
+        }
+        
+        QueryBuilder appendMultiOrdering(List<Order> orderings, String alias)
+        {
+            for (Order order : orderings)
+            {
+                this.appendAlias(alias);
+                this.appendOrdering(order);
+                this.builder.append(Constants.COMMA);
+            }
+
+            // remove last comma
+            this.builder.deleteCharAt(this.builder.length() - 1);
+            return this;
         }
 
         QueryBuilder appendOrdering(Order orderAttribute)
@@ -270,6 +278,9 @@ public final class CriteriaQueryTranslator
             return this;
         }
 
+        /**
+         * @return
+         */
         QueryBuilder appendWhereClause()
         {
             this.builder.append(Constants.SPACE);
@@ -278,6 +289,10 @@ public final class CriteriaQueryTranslator
             return this;
         }
 
+        /**
+         * @param attrib
+         * @return
+         */
         QueryBuilder appendAttribute(Attribute attrib)
         {
             this.builder.append(".");
@@ -285,6 +300,11 @@ public final class CriteriaQueryTranslator
             return this;
         }
 
+        /**
+         * @param expr
+         * @param alias
+         * @return
+         */
         QueryBuilder appendWhere(final Expression<Boolean> expr, final String alias)
         {
 
@@ -329,11 +349,14 @@ public final class CriteriaQueryTranslator
             return this;
         }
 
+        /**
+         * @param alias
+         * @param expr
+         */
         private void appendValueClause(final String alias, Expression expr)
         {
             ConditionalOperator condition = ((ComparisonPredicate) expr).getCondition();
             DefaultPath path = (DefaultPath) ((ComparisonPredicate) expr).getLhs();
-
             Object value = ((ComparisonPredicate) expr).getRhs();
             this.builder.append(alias);
             this.builder.append(".");
@@ -346,10 +369,15 @@ public final class CriteriaQueryTranslator
             this.builder.append(Constants.SPACE);
             this.builder.append(conditions.get(condition));
             this.builder.append(Constants.SPACE);
-            this.builder.append(value);
+            appendValue(value, isStringLiteral(((AbstractAttribute) path.getAttribute()).getBindableJavaType(), value));
             this.builder.append(Constants.SPACE);
         }
 
+        /**
+         * @param alias
+         * @param expr
+         * @param btw
+         */
         private void appendBTValueClause(final String alias, Expression expr, BetweenPredicate btw)
         {
             DefaultPath path = (DefaultPath) expr;
@@ -359,11 +387,60 @@ public final class CriteriaQueryTranslator
             this.builder.append(Constants.SPACE);
             this.builder.append(conditions.get(btw.getCondition()));
             this.builder.append(Constants.SPACE);
-            this.builder.append(btw.getLower());
+            appendValue(btw.getLower(),
+                    isStringLiteral(((AbstractAttribute) path.getAttribute()).getBindableJavaType(), btw.getLower()));
             this.builder.append(Constants.SPACE);
             this.builder.append("AND");
             this.builder.append(Constants.SPACE);
-            this.builder.append(btw.getUpper());
+            appendValue(btw.getUpper(),
+                    isStringLiteral(((AbstractAttribute) path.getAttribute()).getBindableJavaType(), btw.getUpper()));
+        }
+
+        /**
+         * @param value
+         * @param isString
+         */
+        private void appendValue(Object value, boolean isString)
+        {
+            if (isString)
+            {
+                this.builder.append("\"").append(value).append("\"");
+            }
+            else
+            {
+                this.builder.append(value);
+            }
+
+        }
+
+        /**
+         * @param fieldClazz
+         * @param value
+         * @return
+         */
+        private boolean isStringLiteral(Class fieldClazz, Object value)
+        {
+            return !isNumericValue(fieldClazz) && !isNumericValue(value.getClass());
+        }
+
+        /**
+         * @param clazz
+         * @return
+         */
+        private boolean isNumericValue(Class clazz)
+        {
+
+            if (!clazz.isPrimitive())
+            {
+                return Number.class.isAssignableFrom(clazz.getSuperclass());
+            }
+            else
+            {
+                return int.class.isAssignableFrom(clazz) || float.class.isAssignableFrom(clazz)
+                        || double.class.isAssignableFrom(clazz) || long.class.isAssignableFrom(clazz)
+                        || byte.class.isAssignableFrom(clazz) || short.class.isAssignableFrom(clazz);
+            }
+
         }
 
     }

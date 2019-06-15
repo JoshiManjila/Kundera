@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<clientProperties>
+
+	<datastores>
+
+		<dataStore>
+			<name>hdfs</name>
+			<connection>
+				<properties>
+					<property name="spark.master" value="local"></property>
+					<property name="spark.app.name" value="sparkhdfs"></property>
+					<property name="spark.executor.memory" value="1g"></property>
+<!-- 					<property name="spark.driver.allowMultipleContexts" value="true"></property> -->
+				</properties>
+			</connection>
+		</dataStore>
+
+		<dataStore>
+			<name>fs</name>
+			<connection>
+				<properties>
+					<property name="spark.master" value="local"></property>
+					<property name="spark.app.name" value="sparkfs"></property>
+					<property name="spark.executor.memory" value="1g"></property>
+<!-- 					<property name="spark.driver.allowMultipleContexts" value="true"></property> -->
+				</properties>
+			</connection>
+		</dataStore>
+
+	</datastores>
+
+</clientProperties>

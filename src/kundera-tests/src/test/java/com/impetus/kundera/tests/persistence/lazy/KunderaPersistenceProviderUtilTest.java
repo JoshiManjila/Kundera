@@ -32,6 +32,7 @@ import org.junit.Test;
 import com.impetus.kundera.KunderaPersistence;
 import com.impetus.kundera.KunderaPersistenceProviderUtil;
 import com.impetus.kundera.PersistenceProperties;
+import com.impetus.kundera.client.cassandra.persistence.CassandraCli;
 
 /**
  * @author amresh.singh Test case for {@link KunderaPersistenceProviderUtil}
@@ -50,6 +51,8 @@ import com.impetus.kundera.PersistenceProperties;
  */
 public class KunderaPersistenceProviderUtilTest
 {
+    private static final String KUNDERA_TESTS = "KunderaTests";
+
     private EntityManagerFactory emf;
 
     private EntityManager em;
@@ -69,11 +72,16 @@ public class KunderaPersistenceProviderUtilTest
 
         setup.startServer();
         setup.createSchema();
+        
+        if(!CassandraCli.keyspaceExist(KUNDERA_TESTS)){
+            CassandraCli.createKeySpace(KUNDERA_TESTS);
+        }
 
         Map<String, String> propertyMap = new HashMap<String, String>();
         if (propertyMap.isEmpty())
         {
             propertyMap.put(PersistenceProperties.KUNDERA_DDL_AUTO_PREPARE, "");
+            propertyMap.put(PersistenceProperties.KUNDERA_NODES, "localhost");
         }
         Map mapOfExternalProperties = new HashMap<String, Map>();
         mapOfExternalProperties.put("addCassandra", propertyMap);

@@ -33,6 +33,7 @@ import javax.persistence.metamodel.EmbeddableType;
 import javax.persistence.metamodel.EntityType;
 import javax.persistence.metamodel.PluralAttribute;
 
+import org.apache.cassandra.cql3.FieldIdentifier;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.MapType;
@@ -52,6 +53,7 @@ import org.apache.cassandra.thrift.CounterColumn;
 import org.apache.cassandra.thrift.CounterSuperColumn;
 import org.apache.cassandra.thrift.CqlMetadata;
 import org.apache.cassandra.thrift.SuperColumn;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -89,6 +91,36 @@ import com.impetus.kundera.utils.TimestampGenerator;
  */
 public abstract class CassandraDataHandlerBase
 {
+
+    /** The Constant SYS_SUM. */
+    private static final String SYS_SUM = "system.sum";
+
+    /** The Constant SYS_AVG. */
+    private static final String SYS_AVG = "system.avg";
+
+    /** The Constant SYS_MAX. */
+    private static final String SYS_MAX = "system.max";
+
+    /** The Constant SYS_MIN. */
+    private static final String SYS_MIN = "system.min";
+
+    /** The Constant SYS_COUNT. */
+    private static final String SYS_COUNT = "system.count";
+
+    /** The Constant SUM. */
+    private static final String SUM = "sum";
+
+    /** The Constant AVG. */
+    private static final String AVG = "avg";
+
+    /** The Constant MAX. */
+    private static final String MAX = "max";
+
+    /** The Constant MIN. */
+    private static final String MIN = "min";
+
+    /** The Constant COUNT. */
+    private static final String COUNT = "count";
 
     /** The log. */
     private static Logger log = LoggerFactory.getLogger(CassandraDataHandlerBase.class);
@@ -1169,7 +1201,8 @@ public abstract class CassandraDataHandlerBase
                         }
                     }
                 }
-                else if (metaModel.isEmbeddable(((AbstractAttribute) m.getIdAttribute()).getBindableJavaType()))
+                else if (metaModel.isEmbeddable(((AbstractAttribute) m.getIdAttribute()).getBindableJavaType())
+                        && !isAggregate(thriftColumnName))
                 {
                     entity = populateCompositeId(m, entity, thriftColumnName, thriftColumnValue, metaModel,
                             m.getIdAttribute(), m.getEntityClazz());
@@ -1223,6 +1256,30 @@ public abstract class CassandraDataHandlerBase
     }
 
     /**
+     * Checks if is aggregate.
+     * 
+     * @param thriftColumnName
+     *            the thrift column name
+     * @return true, if is aggregate
+     */
+    private boolean isAggregate(String thriftColumnName)
+    {
+        if (thriftColumnName.startsWith(SYS_COUNT) || thriftColumnName.startsWith(SYS_MIN)
+                || thriftColumnName.startsWith(SYS_MAX) || thriftColumnName.startsWith(SYS_AVG)
+                || thriftColumnName.startsWith(SYS_SUM))
+        {
+            return true;
+        }
+        else if (thriftColumnName.startsWith(COUNT) || thriftColumnName.startsWith(MIN)
+                || thriftColumnName.startsWith(MAX) || thriftColumnName.startsWith(AVG)
+                || thriftColumnName.startsWith(SUM))
+        {
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * Compose and add.
      * 
      * @param entity
@@ -1269,7 +1326,7 @@ public abstract class CassandraDataHandlerBase
      */
     private Object setUdtValue(Object entity, Object thriftColumnValue, MetamodelImpl metaModel, Attribute attribute)
     {
-        List<ByteBuffer> fieldNames = new ArrayList<ByteBuffer>();
+        List<FieldIdentifier> fieldNames = new ArrayList<FieldIdentifier>();
         List<AbstractType<?>> fieldTypes = new ArrayList<AbstractType<?>>();
 
         String val = null;
@@ -1292,7 +1349,7 @@ public abstract class CassandraDataHandlerBase
 
         try
         {
-            userType = UserType.getInstance(new TypeParser(val.substring(val.indexOf("("), val.length())));
+            userType = UserType.getInstance(new TypeParser(val.substring(val.indexOf("UserType(") + 8, val.length())));
         }
         catch (ConfigurationException | SyntaxException e)
         {
@@ -1331,7 +1388,7 @@ public abstract class CassandraDataHandlerBase
      *            the meta model
      * @return the object
      */
-    public Object populateEmbeddedRecursive(ByteBuffer value, List<AbstractType<?>> types, List<ByteBuffer> fieldNames,
+    public Object populateEmbeddedRecursive(ByteBuffer value, List<AbstractType<?>> types, List<FieldIdentifier> fieldNames,
             Object entity, MetamodelImpl metaModel)
     {
         ByteBuffer input = value.duplicate();
@@ -1344,7 +1401,7 @@ public abstract class CassandraDataHandlerBase
                 return entity;
 
             AbstractType<?> type = types.get(i);
-            String name = new String(fieldNames.get(i).array()); // JPA name,
+            String name = fieldNames.get(i).toString(); 		 // JPA name,
                                                                  // convert to
                                                                  // column name
 
@@ -1372,7 +1429,7 @@ public abstract class CassandraDataHandlerBase
 
             if (type.getClass().getSimpleName().equals("UserType"))
             {
-                List<ByteBuffer> subFieldNames = ((UserType) type).fieldNames();// ok
+                List<FieldIdentifier> subFieldNames = ((UserType) type).fieldNames();// ok
                 List<AbstractType<?>> subfieldTypes = ((UserType) type).fieldTypes();
 
                 // create entity with type_name and populate fields, set entity
@@ -1421,7 +1478,14 @@ public abstract class CassandraDataHandlerBase
                     serializer.validate(field);
 
                     Object finalValue = serializer.deserialize(field);
-                    PropertyAccessorHelper.set(entity, fieldToSet, finalValue);
+                    if (type.getClass().getSimpleName().equals("UTF8Type"))
+                    {
+                        PropertyAccessorHelper.set(entity, fieldToSet, ((String) finalValue).getBytes());
+                    }
+                    else
+                    {
+                        PropertyAccessorHelper.set(entity, fieldToSet, finalValue);
+                    }
                 }
 
             }
@@ -1543,9 +1607,10 @@ public abstract class CassandraDataHandlerBase
         {
 
             String key = UTF8Serializer.instance.deserialize((schemaType.getKey()));
-            if (key.equals(((AbstractAttribute) attribute).getJavaMember().getName()))
+            if (key.equals(((AbstractAttribute) attribute).getJPAColumnName()))
             {
                 cqlColumnMetadata = schemaType.getValue();
+                break;
             }
         }
 
@@ -1620,8 +1685,10 @@ public abstract class CassandraDataHandlerBase
      *            the field
      * @param metaModel
      *            the meta model
-     * @param embeddedObject
-     *            the embedded object
+     * @param embeddedClass
+     *            the embedded class
+     * @param useNativeProtocol2
+     *            the use native protocol2
      * @return the object
      */
     private Object setElementCollectionMap(MapType mapType, ByteBuffer thriftColumnValue, Object entity, Field field,
@@ -1633,7 +1700,7 @@ public abstract class CassandraDataHandlerBase
         Map outputCollection = new HashMap();
         if (useNativeProtocol2)
         {
-            outputCollection.putAll(mapSerializer.deserializeForNativeProtocol(thriftColumnValue, 2));
+            outputCollection.putAll(mapSerializer.deserializeForNativeProtocol(thriftColumnValue, ProtocolVersion.V2));
         }
         else
         {
@@ -1666,8 +1733,10 @@ public abstract class CassandraDataHandlerBase
      *            the field
      * @param metaModel
      *            the meta model
-     * @param embeddedObject
-     *            the embedded object
+     * @param embeddedClass
+     *            the embedded class
+     * @param useNativeProtocol2
+     *            the use native protocol2
      * @return the object
      */
     private Object setElementCollectionSet(SetType setType, ByteBuffer thriftColumnValue, Object entity, Field field,
@@ -1678,7 +1747,7 @@ public abstract class CassandraDataHandlerBase
         Collection outputCollection = new ArrayList();
         if (useNativeProtocol2)
         {
-            outputCollection.addAll((Collection) setSerializer.deserializeForNativeProtocol(thriftColumnValue, 2));
+            outputCollection.addAll((Collection) setSerializer.deserializeForNativeProtocol(thriftColumnValue, ProtocolVersion.V2));
         }
         else
         {
@@ -1712,8 +1781,10 @@ public abstract class CassandraDataHandlerBase
      *            the field
      * @param metaModel
      *            the meta model
-     * @param embeddedObject
-     *            the embedded object
+     * @param embeddedClass
+     *            the embedded class
+     * @param useNativeProtocol2
+     *            the use native protocol2
      * @return the object
      */
     private Object setElementCollectionList(ListType listType, ByteBuffer thriftColumnValue, Object entity,
@@ -1724,7 +1795,7 @@ public abstract class CassandraDataHandlerBase
         Collection outputCollection = new ArrayList();
         if (useNativeProtocol2)
         {
-            outputCollection.addAll((Collection) listSerializer.deserializeForNativeProtocol(thriftColumnValue, 2));
+            outputCollection.addAll((Collection) listSerializer.deserializeForNativeProtocol(thriftColumnValue, ProtocolVersion.V2));
         }
         else
         {

@@ -3,37 +3,22 @@
 	<parent>
 		<groupId>com.impetus</groupId>
 		<artifactId>kundera</artifactId>
-		<version>3.0-SNAPSHOT</version>
+		<version>3.14-SNAPSHOT</version>
 	</parent>
 	<groupId>com.impetus.kundera.client</groupId>
 	<artifactId>kundera-neo4j</artifactId>
 	<packaging>jar</packaging>
 	<name>kundera-neo4j</name>
 	<url>http://maven.apache.org</url>
-	<repositories>
-		<repository>
-			<id>neo4j-release-repository</id>
-			<name>Neo4j Maven 2 release repository</name>
-			<url>http://m2.neo4j.org/releases</url>
-			<releases>
-				<enabled>true</enabled>
-			</releases>
-			<snapshots>
-				<enabled>false</enabled>
-			</snapshots>
-		</repository>
-		<repository>
-			<id>neo4j-snapshot-repository</id>
-			<name>Neo4j Maven 2 snapshot repository</name>
-			<url>http://m2.neo4j.org/snapshots</url>
-			<snapshots>
-				<enabled>true</enabled>
-			</snapshots>
-			<releases>
-				<enabled>false</enabled>
-			</releases>
-		</repository>
-	</repositories>
+
+	<!-- <repositories> <repository> <id>neo4j-release-repository</id> <name>Neo4j 
+		Maven 2 release repository</name> <url>http://m2.neo4j.org/releases</url> 
+		<releases> <enabled>true</enabled> </releases> <snapshots> <enabled>false</enabled> 
+		</snapshots> </repository> <repository> <id>neo4j-snapshot-repository</id> 
+		<name>Neo4j Maven 2 snapshot repository</name> <url>http://m2.neo4j.org/snapshots</url> 
+		<snapshots> <enabled>true</enabled> </snapshots> <releases> <enabled>false</enabled> 
+		</releases> </repository> </repositories> -->
+
 	<dependencies>
 		<dependency>
 			<groupId>junit</groupId>
@@ -137,6 +122,28 @@
 				code coverage. <destFile>${project.basedir}/../target/jacoco-it.exec</destFile> 
 				</configuration> <executions> <execution> <id>post-test</id> <configuration> 
 				<skip>true</skip> </configuration> </execution> </executions> </plugin> -->
+
+
 		</plugins>
 	</build>
+	<profiles>
+		<profile>
+			<id>doclint-java8-disable</id>
+			<activation>
+				<jdk>[1.8,)</jdk>
+			</activation>
+
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-javadoc-plugin</artifactId>
+						<configuration>
+							<additionalparam>-Xdoclint:none</additionalparam>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 </project>

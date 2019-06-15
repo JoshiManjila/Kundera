@@ -2,8 +2,9 @@ package com.impetus.client.es.index;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetSocketAddress;
 import java.util.HashMap;
-import java.util.LinkedList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -11,11 +12,10 @@ import java.util.Properties;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.eclipse.persistence.jpa.jpql.parser.CollectionExpression;
 import org.eclipse.persistence.jpa.jpql.parser.Expression;
+import org.eclipse.persistence.jpa.jpql.parser.OrderByItem;
 import org.eclipse.persistence.jpa.jpql.parser.WhereClause;
 import org.eclipse.persistence.jpa.jpql.utility.iterable.ListIterable;
-import org.eclipse.persistence.jpa.jpql.utility.iterable.SnapshotCloneListIterable;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.ListenableActionFuture;
 import org.elasticsearch.action.delete.DeleteResponse;
@@ -25,15 +25,17 @@ import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.client.transport.TransportClient;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
-import org.elasticsearch.index.query.FilterBuilder;
 import org.elasticsearch.index.query.FilteredQueryBuilder;
+import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.aggregations.AggregationBuilder;
+import org.elasticsearch.search.sort.SortOrder;
 
 import com.fasterxml.jackson.core.JsonGenerationException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.impetus.client.es.ESConstants;
 import com.impetus.client.es.ESQuery;
 import com.impetus.client.es.utils.ESResponseWrapper;
 import com.impetus.kundera.Constants;
@@ -50,6 +52,7 @@ import com.impetus.kundera.persistence.PersistenceDelegator;
 import com.impetus.kundera.property.PropertyAccessorHelper;
 import com.impetus.kundera.query.KunderaQuery;
 import com.impetus.kundera.query.KunderaQueryUtils;
+import com.impetus.kundera.utils.KunderaCoreUtils;
 import com.thoughtworks.xstream.XStream;
 
 /**
@@ -67,10 +70,11 @@ public class ESIndexer implements Indexer
     private static final long UUID = 6077004083174677888L;
 
     /** The Constant PARENT_ID_FIELD. */
-    public static final String PARENT_ID_FIELD = UUID + ".parent.id";
+    // ES 2.0+ doesn't support '.' in field name (Causes MapperParsingException)
+    public static final String PARENT_ID_FIELD = UUID + "_parent_id";
 
     /** The Constant PARENT_ID_CLASS. */
-    public static final String PARENT_ID_CLASS = UUID + ".parent.class";
+    public static final String PARENT_ID_CLASS = UUID + "_parent_class";
 
     /** the log used by this class. */
     private static Log log = LogFactory.getLog(ESIndexer.class);
@@ -108,7 +112,7 @@ public class ESIndexer implements Indexer
         ObjectMapper mapper = new ObjectMapper();
         try
         {
-            values.put("entity.class", metadata.getEntityClazz().getCanonicalName().toLowerCase());
+            values.put("entity_class", metadata.getEntityClazz().getCanonicalName().toLowerCase());
             if (parentId != null)
             {
                 values.put(PARENT_ID_FIELD, parentId);
@@ -165,7 +169,7 @@ public class ESIndexer implements Indexer
         }
 
         ListenableActionFuture<SearchResponse> listenableActionFuture = client
-                .prepareSearch(m.getSchema().toLowerCase()).setQuery(QueryBuilders.queryString(luceneQuery))
+                .prepareSearch(m.getSchema().toLowerCase()).setQuery(QueryBuilders.queryStringQuery(luceneQuery))
                 .setSize(40000).execute();
         SearchResponse response = listenableActionFuture.actionGet();
 
@@ -191,18 +195,19 @@ public class ESIndexer implements Indexer
      */
     @Override
     public Map<String, Object> search(KunderaMetadata kunderaMetadata, KunderaQuery kunderaQuery,
-            PersistenceDelegator persistenceDelegator, EntityMetadata m, int maxResults)
+            PersistenceDelegator persistenceDelegator, EntityMetadata m, int firstResult, int maxResults)
     {
         ESQuery query = new ESQuery<>(kunderaQuery, persistenceDelegator, kunderaMetadata);
-        MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata().getMetamodel(
-                m.getPersistenceUnit());
+        MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata()
+                .getMetamodel(m.getPersistenceUnit());
         Expression whereExpression = KunderaQueryUtils.getWhereClause(kunderaQuery.getJpqlExpression());
 
-        FilterBuilder filter = whereExpression != null ? query.getEsFilterBuilder().populateFilterBuilder(
-                ((WhereClause) whereExpression).getConditionalExpression(), m) : null;
+        QueryBuilder filter = whereExpression != null ? query.getEsFilterBuilder()
+                .populateFilterBuilder(((WhereClause) whereExpression).getConditionalExpression(), m) : null;
 
         FilteredQueryBuilder queryBuilder = QueryBuilders.filteredQuery(null, filter);
-        SearchResponse response = getSearchResponse(kunderaQuery, queryBuilder, filter, query, m, maxResults);
+        SearchResponse response = getSearchResponse(kunderaQuery, queryBuilder, filter, query, m, firstResult,
+                maxResults, kunderaMetadata);
 
         return buildResultMap(response, kunderaQuery, m, metaModel);
     }
@@ -225,7 +230,7 @@ public class ESIndexer implements Indexer
     private Map<String, Object> buildResultMap(SearchResponse response, KunderaQuery query, EntityMetadata m,
             MetamodelImpl metaModel)
     {
-        Map<String, Object> map = new HashMap<>();
+        Map<String, Object> map = new LinkedHashMap<>();
         ESResponseWrapper esResponseReader = new ESResponseWrapper();
 
         for (SearchHit hit : response.getHits())
@@ -260,28 +265,31 @@ public class ESIndexer implements Indexer
      *            the query
      * @param m
      *            the m
+     * @param kunderaMetadata
      * @return the search response
      */
     private SearchResponse getSearchResponse(KunderaQuery kunderaQuery, FilteredQueryBuilder queryBuilder,
-            FilterBuilder filter, ESQuery query, EntityMetadata m, int maxResults)
+            QueryBuilder filter, ESQuery query, EntityMetadata m, int firstResult, int maxResults,
+            KunderaMetadata kunderaMetadata)
     {
-        SearchRequestBuilder builder = client.prepareSearch(m.getSchema().toLowerCase()).setTypes(
-                m.getEntityClazz().getSimpleName());
+        SearchRequestBuilder builder = client.prepareSearch(m.getSchema().toLowerCase())
+                .setTypes(m.getEntityClazz().getSimpleName());
         AggregationBuilder aggregation = query.buildAggregation(kunderaQuery, m, filter);
 
         if (aggregation == null)
         {
             builder.setQuery(queryBuilder);
+            builder.setFrom(firstResult);
             builder.setSize(maxResults);
+            addSortOrder(builder, kunderaQuery, m, kunderaMetadata);
         }
         else
         {
             log.debug("Aggregated query identified");
             builder.addAggregation(aggregation);
 
-            if (kunderaQuery.getResult().length == 1
-                    || (kunderaQuery.isSelectStatement() && KunderaQueryUtils.hasGroupBy(kunderaQuery
-                            .getJpqlExpression())))
+            if (kunderaQuery.getResult().length == 1 || (kunderaQuery.isSelectStatement()
+                    && KunderaQueryUtils.hasGroupBy(kunderaQuery.getJpqlExpression())))
             {
                 builder.setSize(0);
             }
@@ -304,29 +312,6 @@ public class ESIndexer implements Indexer
         return response;
     }
 
-    /**
-     * Gets the select expression list. k
-     * 
-     * @param selectExpression
-     *            the select expression
-     * @return the select expression list
-     */
-    private ListIterable<Expression> getSelectExpressionList(Expression selectExpression)
-    {
-        List<Expression> list;
-
-        if (!(selectExpression instanceof CollectionExpression))
-        {
-            list = new LinkedList<Expression>();
-            list.add(selectExpression);
-            return new SnapshotCloneListIterable<Expression>(list);
-        }
-        else
-        {
-            return selectExpression.children();
-        }
-    }
-
     /*
      * (non-Javadoc)
      * 
@@ -339,8 +324,8 @@ public class ESIndexer implements Indexer
     {
         Object id = PropertyAccessorHelper.getId(entity, metadata);
         DeleteResponse response = client
-                .prepareDelete(metadata.getSchema().toLowerCase(), entityClazz.getSimpleName(), id.toString())
-                .execute().actionGet();
+                .prepareDelete(metadata.getSchema().toLowerCase(), entityClazz.getSimpleName(), id.toString()).execute()
+                .actionGet();
     }
 
     /*
@@ -396,7 +381,7 @@ public class ESIndexer implements Indexer
             {
                 if (client == null)
                 {
-                    client = new TransportClient();
+                    client = TransportClient.builder().build();
                 }
                 for (Node node : nodes)
                 {
@@ -411,8 +396,9 @@ public class ESIndexer implements Indexer
                             throw new IllegalArgumentException(
                                     "Host or port should not be null / port should be numeric");
                         }
-                        ((TransportClient) client).addTransportAddress(new InetSocketTransportAddress(properties
-                                .getProperty("host"), Integer.parseInt(properties.getProperty("port"))));
+                        ((TransportClient) client).addTransportAddress(
+                                new InetSocketTransportAddress(new InetSocketAddress(properties.getProperty("host"),
+                                        Integer.parseInt(properties.getProperty("port")))));
                     }
                 }
             }
@@ -436,5 +422,37 @@ public class ESIndexer implements Indexer
         stream.alias("indexerProperties", IndexerProperties.class);
         stream.alias("node", IndexerProperties.Node.class);
         return stream;
+    }
+
+    /**
+     * Adds the sort order.
+     * 
+     * @param builder
+     *            the builder
+     * @param query
+     *            the query
+     * @param entityMetadata
+     *            the entity metadata
+     * @param kunderaMetadata
+     */
+    private void addSortOrder(SearchRequestBuilder builder, KunderaQuery query, EntityMetadata entityMetadata,
+            KunderaMetadata kunderaMetadata)
+    {
+        MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata()
+                .getMetamodel(entityMetadata.getPersistenceUnit());
+        List<OrderByItem> orderList = KunderaQueryUtils.getOrderByItems(query.getJpqlExpression());
+
+        for (OrderByItem orderByItem : orderList)
+        {
+            String ordering = orderByItem.getOrdering().toString();
+
+            if (ordering.equalsIgnoreCase(ESConstants.DEFAULT))
+            {
+                ordering = Expression.ASC;
+            }
+
+            builder.addSort(KunderaCoreUtils.getJPAColumnName(orderByItem.getExpression().toParsedText(),
+                    entityMetadata, metaModel), SortOrder.valueOf(ordering));
+        }
     }
 }

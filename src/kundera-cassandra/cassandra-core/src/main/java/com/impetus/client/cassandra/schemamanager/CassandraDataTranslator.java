@@ -23,6 +23,7 @@ import java.nio.charset.CharacterCodingException;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -58,6 +59,7 @@ import org.apache.cassandra.serializers.MapSerializer;
 import org.apache.cassandra.serializers.SetSerializer;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.thrift.CounterColumn;
+import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -215,7 +217,7 @@ public final class CassandraDataTranslator
 
         typeToClazz.put(Calendar.class, CassandraType.CALENDAR);
         typeToClazz.put(java.sql.Date.class, CassandraType.SQL_DATE);
-        typeToClazz.put(java.util.Date.class, CassandraType.DATE);
+        typeToClazz.put(java.util.Date.class, CassandraType.TIMESTAMP);
         typeToClazz.put(java.sql.Time.class, CassandraType.SQL_TIME);
         typeToClazz.put(java.sql.Timestamp.class, CassandraType.SQL_TIMESTAMP);
 
@@ -249,7 +251,9 @@ public final class CassandraDataTranslator
      */
     public static CassandraType getCassandraDataTypeClass(Class clazz)
     {
-
+        if(clazz.isEnum()){
+            return CassandraType.STRING;
+        }
         return typeToClazz.get(clazz);
     }
 
@@ -1077,8 +1081,9 @@ public final class CassandraDataTranslator
             try
             {
                 outputCollection = new HashSet();
-                SetSerializer setSerializer = SetSerializer.getInstance(valueClassInstance);
-                outputCollection.addAll((Collection) setSerializer.deserializeForNativeProtocol((ByteBuffer) value, 2));
+                Comparator<ByteBuffer> test = null;
+				SetSerializer setSerializer = SetSerializer.getInstance(valueClassInstance, test );
+                outputCollection.addAll((Collection) setSerializer.deserializeForNativeProtocol((ByteBuffer) value, ProtocolVersion.V2));
                 return marshalCollection(valueValidationClass, outputCollection, genericClass, outputCollection.getClass());
             }
             catch (SecurityException e)
@@ -1172,9 +1177,9 @@ public final class CassandraDataTranslator
                         .getValidationSerializerClassInstance(mapGenericClasses.get(1), true);
 
                 Map rawMap = new HashMap();
-                MapSerializer mapSerializer = MapSerializer.getInstance(keyClassInstance, valueClassInstance);
+                MapSerializer mapSerializer = MapSerializer.getInstance(keyClassInstance, valueClassInstance, null);
 
-                rawMap.putAll(mapSerializer.deserializeForNativeProtocol((ByteBuffer) value, 2));
+                rawMap.putAll(mapSerializer.deserializeForNativeProtocol((ByteBuffer) value, ProtocolVersion.V2));
 
                 Map dataCollection = marshalMap(mapGenericClasses, keyClass, valueClass, rawMap);
                 return dataCollection.isEmpty() ? rawMap : dataCollection;
@@ -1265,7 +1270,7 @@ public final class CassandraDataTranslator
             {
                 ListSerializer listSerializer = ListSerializer.getInstance(valueClassInstance);
                 outputCollection
-                        .addAll((Collection) listSerializer.deserializeForNativeProtocol((ByteBuffer) value, 2));
+                        .addAll((Collection) listSerializer.deserializeForNativeProtocol((ByteBuffer) value, ProtocolVersion.V2));
 
                 return marshalCollection(valueValidationClass, outputCollection, genericClass, outputCollection.getClass());
             }

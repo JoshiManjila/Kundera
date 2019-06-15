@@ -147,6 +147,12 @@ public interface Constants
     /** The Constant COL_NAME. */
     public static final String COL_NAME = "colName";
 
+    /** The Constant IGNORE_CASE. */
+    public static final String IGNORE_CASE = "ignoreCase";
+
+    /** The Constant COMPOSITE. */
+    public final static String COMPOSITE = "composite";
+
     /** The Constant IS_EMBEDDABLE. */
     public static final String IS_EMBEDDABLE = "isEmbeddable";
 
@@ -155,4 +161,44 @@ public interface Constants
 
     /** The Constant FIELD_NAME. */
     public static final String FIELD_NAME = "fieldName";
+
+    /** The Constant ESCAPE_QUOTE. */
+    public static final String ESCAPE_QUOTE = "\"";
+
+    /** The Constant OPEN_SQUARE_BRACKET. */
+    public static final String OPEN_SQUARE_BRACKET = "[";
+
+    /** The Constant CLOSE_SQUARE_BRACKET. */
+    public static final String CLOSE_SQUARE_BRACKET = "]";
+
+    /** The Constant OPEN_ROUND_BRACKET. */
+    public static final String OPEN_ROUND_BRACKET = "(";
+
+    /** The Constant CLOSE_ROUND_BRACKET. */
+    public static final String CLOSE_ROUND_BRACKET = ")";
+
+    /** The Constant OPEN_CURLY_BRACKET. */
+    public static final String OPEN_CURLY_BRACKET = "{";
+
+    /** The Constant COMMA. */
+    public static final String COMMA = ",";
+
+    /** The Constant CLOSE_CURLY_BRACKET. */
+    public static final String CLOSE_CURLY_BRACKET = "}";
+
+    /** The Constant COLON. */
+    public static final String COLON = ":";
+
+    /** The Constant SEMI_COLON. */
+    public static final String SEMI_COLON = ";";
+
+    /** The Constant STR_GT. */
+    public static final String STR_GT = ">";
+
+    /** The Constant STR_LT. */
+    public static final String STR_LT = "<";
+
+    /** The Constant SPACE_COMMA. */
+    public static final String SPACE_COMMA = " ,";
+
 }

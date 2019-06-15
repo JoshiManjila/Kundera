@@ -38,7 +38,6 @@ import oracle.kv.DurabilityException;
 import oracle.kv.FaultException;
 import oracle.kv.KVStore;
 import oracle.kv.Key;
-import oracle.kv.OperationExecutionException;
 import oracle.kv.impl.api.table.TableImpl;
 import oracle.kv.table.FieldDef;
 import oracle.kv.table.FieldValue;
@@ -50,6 +49,7 @@ import oracle.kv.table.ReturnRow.Choice;
 import oracle.kv.table.Row;
 import oracle.kv.table.Table;
 import oracle.kv.table.TableAPI;
+import oracle.kv.table.TableOpExecutionException;
 import oracle.kv.table.TableOperation;
 
 import org.apache.commons.lang.StringUtils;
@@ -59,6 +59,7 @@ import org.slf4j.LoggerFactory;
 import com.impetus.client.oraclenosql.config.OracleNoSQLClientProperties;
 import com.impetus.client.oraclenosql.query.OracleNoSQLQuery;
 import com.impetus.client.oraclenosql.query.OracleNoSQLQueryInterpreter;
+import com.impetus.kundera.KunderaException;
 import com.impetus.kundera.PersistenceProperties;
 import com.impetus.kundera.client.Client;
 import com.impetus.kundera.client.ClientBase;
@@ -81,7 +82,6 @@ import com.impetus.kundera.persistence.EntityManagerFactoryImpl.KunderaMetadata;
 import com.impetus.kundera.persistence.EntityReader;
 import com.impetus.kundera.persistence.api.Batcher;
 import com.impetus.kundera.persistence.context.jointable.JoinTableData;
-import com.impetus.kundera.property.PropertyAccessException;
 import com.impetus.kundera.property.PropertyAccessorHelper;
 import com.impetus.kundera.query.KunderaQuery.FilterClause;
 import com.impetus.kundera.query.QueryHandlerException;
@@ -97,6 +97,8 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
 
     /** The Constant SEPERATOR. */
     private static final String SEPERATOR = "_";
+
+    private static final String JOIN_TABLE_PRIMARY_KEY_NAME = "key";
 
     /** The kvstore db. */
     private KVStore kvStore;
@@ -193,7 +195,6 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
      *            columns to select
      * @return the object
      */
-    @SuppressWarnings("unchecked")
     private Object find(Class entityClass, Object key, List<String> columnsToSelect)
     {
         EntityMetadata entityMetadata = KunderaMetadataManager.getEntityMetadata(kunderaMetadata, entityClass);
@@ -375,10 +376,11 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
         String invJoinColumnName = joinTableData.getInverseJoinColumnName();
         Map<Key, List<TableOperation>> operations = new HashMap<Key, List<TableOperation>>();
 
-        // String schema = joinTableData.getSchemaName();
         Table schemaTable = tableAPI.getTable(joinTableName);
         Row row = schemaTable.createRow();
-        String primaryKey = joinColumnName + SEPERATOR + invJoinColumnName;
+
+        // String primaryKey = joinColumnName + SEPERATOR + invJoinColumnName;
+
         KunderaCoreUtils.printQuery("Persist Join Table:" + joinTableName, showQuery);
         Map<Object, Set<Object>> joinTableRecords = joinTableData.getJoinTableRecords();
 
@@ -398,8 +400,8 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
 
                     NoSqlDBUtils.add(schemaTable.getField(invJoinColumnName), row, childId, invJoinColumnName);
 
-                    NoSqlDBUtils.add(schemaTable.getField(primaryKey), row,
-                            pk.toString() + SEPERATOR + childId.toString(), primaryKey);
+                    NoSqlDBUtils.add(schemaTable.getField(JOIN_TABLE_PRIMARY_KEY_NAME), row,
+                            pk.toString() + SEPERATOR + childId.toString(), JOIN_TABLE_PRIMARY_KEY_NAME);
 
                     addOps(operations, schemaTable, row);
                 }
@@ -465,7 +467,7 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
                 log.error("Error while executing operations in OracleNOSQL, Caused by:" + e + ".");
                 throw new PersistenceException("Error while Persisting data using batch", e);
             }
-            catch (OperationExecutionException e)
+            catch (TableOpExecutionException e)
             {
                 log.error("Error while executing operations in OracleNOSQL, Caused by:" + e + ".");
                 throw new PersistenceException("Error while Persisting data using batch", e);
@@ -590,7 +592,7 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
             }
         }
         else if (interpreter.getClauseQueue().size() >= 1) // query over index
-                                                           // keys.
+        // keys.
         {
             return onIndexSearch(interpreter, entityMetadata, metamodel, results,
                     Arrays.asList(interpreter.getSelectColumns()));
@@ -598,7 +600,8 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
         return results;
 
         // throw new
-        // UnsupportedOperationException("Query with where clause is not yet supported");
+        // UnsupportedOperationException("Query with where clause is not yet
+        // supported");
     }
 
     /*
@@ -633,8 +636,9 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
 
         // StringBuilder indexNamebuilder = new StringBuilder();
         NoSqlDBUtils.add(schemaTable.getField(pKeyColumnName), indexKey, pKeyColumnValue, pKeyColumnName);
-        KunderaCoreUtils.printQuery("Get columns by id from:" + tableName + " for column:" + columnName
-                + " where value:" + pKeyColumnValue, showQuery);
+        KunderaCoreUtils.printQuery(
+                "Get columns by id from:" + tableName + " for column:" + columnName + " where value:" + pKeyColumnValue,
+                showQuery);
         Iterator<Row> rowsIter = tableAPI.tableIterator(indexKey, null, null);
 
         while (rowsIter.hasNext())
@@ -921,9 +925,9 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
     /*
      * (non-Javadoc)
      * 
-     * @see
-     * com.impetus.kundera.client.ClientPropertiesSetter#populateClientProperties
-     * (com.impetus.kundera.client.Client, java.util.Map)
+     * @see com.impetus.kundera.client.ClientPropertiesSetter#
+     * populateClientProperties (com.impetus.kundera.client.Client,
+     * java.util.Map)
      */
     @Override
     public void populateClientProperties(Client client, Map<String, Object> properties)
@@ -1117,8 +1121,9 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
                     if (valueObj != null)
                     {
                         NoSqlDBUtils.add(schemaTable.getField(relationName), row, valueObj, relationName);
-                        KunderaCoreUtils.printQuery("Add relation: relation name:" + relationName + "relation value:"
-                                + valueObj, showQuery);
+                        KunderaCoreUtils.printQuery(
+                                "Add relation: relation name:" + relationName + "relation value:" + valueObj,
+                                showQuery);
                     }
                 }
             }
@@ -1284,7 +1289,7 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
      */
     private List scrollAndPopulate(Object key, EntityMetadata entityMetadata, MetamodelImpl metaModel,
             Table schemaTable, Iterator<Row> rowsIter, Map<String, Object> relationMap, List<String> columnsToSelect)
-            throws InstantiationException, IllegalAccessException
+                    throws InstantiationException, IllegalAccessException
     {
         List results = new ArrayList();
         Object entity = null;
@@ -1301,8 +1306,8 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
             FieldDef fieldMetadata = null;
             FieldValue value = null;
             String idColumnName = ((AbstractAttribute) entityMetadata.getIdAttribute()).getJPAColumnName();
-            if (/* eligibleToFetch(columnsToSelect, idColumnName) && */!metaModel.isEmbeddable(entityMetadata
-                    .getIdAttribute().getBindableJavaType()))
+            if (/* eligibleToFetch(columnsToSelect, idColumnName) && */!metaModel
+                    .isEmbeddable(entityMetadata.getIdAttribute().getBindableJavaType()))
             {
                 populateId(entityMetadata, schemaTable, entity, row);
             }
@@ -1325,8 +1330,8 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
                         // readEmbeddable(value, columnsToSelect,
                         // entityMetadata, metaModel, schemaTable, value,
                         // attribute);
-                        EmbeddableType embeddableId = metaModel.embeddable(((AbstractAttribute) attribute)
-                                .getBindableJavaType());
+                        EmbeddableType embeddableId = metaModel
+                                .embeddable(((AbstractAttribute) attribute).getBindableJavaType());
                         Set<Attribute> embeddedAttributes = embeddableId.getAttributes();
                         Object embeddedObject = ((AbstractAttribute) attribute).getBindableJavaType().newInstance();
                         for (Attribute embeddedAttrib : embeddedAttributes)
@@ -1356,8 +1361,8 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
 
                             if (relation != null)
                             {
-                                EntityMetadata associationMetadata = KunderaMetadataManager.getEntityMetadata(
-                                        kunderaMetadata, relation.getTargetEntity());
+                                EntityMetadata associationMetadata = KunderaMetadataManager
+                                        .getEntityMetadata(kunderaMetadata, relation.getTargetEntity());
                                 if (!relation.getType().equals(ForeignKey.MANY_TO_MANY))
                                 {
                                     relationMap.put(jpaColumnName, NoSqlDBUtils.get(fieldMetadata, value,
@@ -1371,8 +1376,11 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
 
             if (entity != null)
             {
-                results.add(relationMap.isEmpty() ? entity : new EnhanceEntity(entity, key != null ? key
-                        : PropertyAccessorHelper.getId(entity, entityMetadata), relationMap));
+                results.add(
+                        relationMap.isEmpty() ? entity
+                                : new EnhanceEntity(entity,
+                                        key != null ? key : PropertyAccessorHelper.getId(entity, entityMetadata),
+                                        relationMap));
             }
         }
         return results;
@@ -1391,8 +1399,8 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
      * @throws IllegalAccessException
      *             the illegal access exception
      */
-    private Object initializeEntity(Object key, EntityMetadata entityMetadata) throws InstantiationException,
-            IllegalAccessException
+    private Object initializeEntity(Object key, EntityMetadata entityMetadata)
+            throws InstantiationException, IllegalAccessException
     {
         Object entity = null;
         entity = entityMetadata.getEntityClazz().newInstance();
@@ -1505,13 +1513,29 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
     private Row createRow(EntityMetadata entityMetadata, Object entity, Object id, List<RelationHolder> rlHolders)
     {
         String schema = entityMetadata.getSchema(); // Irrelevant for this
-                                                    // datastore
+        // datastore
         String table = entityMetadata.getTableName();
 
         MetamodelImpl metamodel = (MetamodelImpl) KunderaMetadataManager.getMetamodel(kunderaMetadata,
                 entityMetadata.getPersistenceUnit());
 
-        Table schemaTable = tableAPI.getTable(table);
+        Table schemaTable = null;
+
+        try
+        {
+            schemaTable = tableAPI.getTable(table);
+
+            if (schemaTable == null)
+            {
+                log.error("No table found for " + table);
+                throw new KunderaException("No table found for " + table);
+            }
+        }
+        catch (FaultException ex)
+        {
+            log.error("Error while getting table " + table + ". Caused By: ", ex);
+            throw new KunderaException("Error while getting table " + table + ". Caused By: ", ex);
+        }
 
         Row row = schemaTable.createRow();
 
@@ -1556,8 +1580,8 @@ public class OracleNoSQLClient extends ClientBase implements Client<OracleNoSQLQ
     @Override
     public Generator getIdGenerator()
     {
-        throw new UnsupportedOperationException(GenerationType.class.getSimpleName()
-                + " Strategies not supported by this client : OracleNoSQLClient");
+        throw new UnsupportedOperationException(
+                GenerationType.class.getSimpleName() + " Strategies not supported by this client : OracleNoSQLClient");
     }
 
 }

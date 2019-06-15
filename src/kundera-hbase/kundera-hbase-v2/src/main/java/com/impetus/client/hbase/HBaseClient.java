@@ -471,6 +471,7 @@ public class HBaseClient extends ClientBase implements Client<HBaseQuery>, Batch
         byte[] valueInBytes = HBaseUtils.getBytes(colValue);
         SingleColumnValueFilter filter = new SingleColumnValueFilter(Bytes.toBytes(columnFamilyName),
                 Bytes.toBytes(colName), CompareOp.EQUAL, valueInBytes);
+        filter.setFilterIfMissing(true);
         try
         {
             return ((HBaseDataHandler) handler).readData(tableName, m, null, null, null, null, getFilterList(filter));
@@ -514,7 +515,7 @@ public class HBaseClient extends ClientBase implements Client<HBaseQuery>, Batch
     public Object[] findIdsByColumn(String schemaName, String tableName, String pKeyName, String columnName,
             Object columnValue, Class entityClazz)
     {
-        CompareOp operator = HBaseUtils.getOperator("=", false, false);
+        CompareOp operator = HBaseUtils.getOperator("=", false, false).getOperator();
         EntityMetadata m = KunderaMetadataManager.getEntityMetadata(kunderaMetadata, entityClazz);
 
         byte[] valueInBytes = HBaseUtils.getBytes(columnValue);

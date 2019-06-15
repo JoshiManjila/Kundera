@@ -43,6 +43,7 @@ import com.impetus.client.cassandra.common.CassandraConstants;
 import com.impetus.client.crud.compositeType.CassandraPrimeUser.NickName;
 import com.impetus.kundera.client.Client;
 import com.impetus.kundera.client.cassandra.persistence.CassandraCli;
+import com.impetus.kundera.query.QueryHandlerException;
 
 /**
  * Junit test case for Compound/Composite key.
@@ -318,6 +319,20 @@ public class CassandraCompositeTypeTest
         Assert.assertNull(results.get(0).getKey().getFullName());
         Assert.assertNull(results.get(0).getKey().getFullName());
 
+        final String withSemiColonAtEnd = "Select u from CassandraPrimeUser u where u.key.userId = :userId;";
+        // Query with semi colon at end.
+        try
+        {
+            q = em.createQuery(withSemiColonAtEnd);
+            q.setParameter("userId", "mevivs");
+        }
+        catch (QueryHandlerException qhe)
+        {
+            Assert.assertEquals(
+                    "unexpected char: ';' in query [ Select u from CassandraPrimeUser u where u.key.userId = :userId; ]",
+                    qhe.getMessage().trim());
+        }
+
         em.remove(user);
 
         em.clear();// optional,just to clear persistence cache.
@@ -548,28 +563,22 @@ public class CassandraCompositeTypeTest
 
         inClause = "Select u from CassandraPrimeUser u where u.key.userId IN ('mevivs') ORDER BY u.key.tweetId ASC";
         q = em.createQuery(inClause);
-
+        em.clear();
         results = q.getResultList();
         Assert.assertNotNull(results);
         Assert.assertEquals("my first tweet", results.get(0).getTweetBody());
         Assert.assertEquals(1, results.size());
         Assert.assertNull(results.get(0).getKey().getFullName());
 
-        try
-        {
-            inClause = "Select u from CassandraPrimeUser u where u.key.tweetId IN (1,2,3) ORDER BY u.key.tweetId DESC";
-            q = em.createQuery(inClause);
-            results = q.getResultList();
-
-            Assert.fail();
-        }
-        catch (Exception e)
-        {
-            Assert.assertEquals(
-                    "javax.persistence.PersistenceException: com.impetus.kundera.KunderaException: InvalidRequestException(why:Clustering column \"tweetId\" cannot be restricted by an IN relation)",
-                    e.getMessage());
-
-        }
+        inClause = "Select u from CassandraPrimeUser u where u.key.userId IN ('mevivs', 'cgangwals', 'karthik') and u.key.tweetId IN (1,2,3) ORDER BY u.key.tweetId DESC";
+        q = em.createQuery(inClause);
+        results = q.getResultList();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(2, results.size());
+        Assert.assertEquals("cgangwals", results.get(0).getKey().getUserId());
+        Assert.assertEquals(2, results.get(0).getKey().getTweetId());
+        Assert.assertEquals("mevivs", results.get(1).getKey().getUserId());
+        Assert.assertEquals(1, results.get(1).getKey().getTweetId());
 
         // In Query.
         inClause = "Select u from CassandraPrimeUser u where u.key.userId IN ('mevivs','kmishra') ORDER BY u.key.tweetId ASC";
@@ -628,17 +637,8 @@ public class CassandraCompositeTypeTest
 
         q.setParameter("keyList", keyList);
 
-        try
-        {
-            results = q.getResultList();
-            Assert.fail();
-        }
-        catch (Exception e)
-        {
-            Assert.assertEquals(
-                    "javax.persistence.PersistenceException: com.impetus.kundera.KunderaException: InvalidRequestException(why:Clustering column \"tweetId\" cannot be restricted by an IN relation)",
-                    e.getMessage());
-        }
+        results = q.getResultList();
+
     }
 
     /**

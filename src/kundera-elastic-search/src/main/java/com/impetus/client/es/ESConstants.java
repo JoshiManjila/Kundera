@@ -42,10 +42,19 @@ public interface ESConstants
 
     /** The Constant aggName. */
     public static final String AGGREGATION_NAME = "esAggs";
-    
+
     /** The Constant groupBy. */
     public static final String GROUP_BY = "group by";
-    
+
     /** The Constant topHits. */
     public static final String TOP_HITS = "top";
+
+    /** The Constant DEFAULT. */
+    public static final String DEFAULT = "DEFAULT";
+
+    /** The Constant ES_REFRESH_INDEXES. */
+    public static final String ES_REFRESH_INDEXES = "es.refresh.indexes";
+    
+    /** The Constant KUNDERA_ES_REFRESH_INDEXES. */
+    public static final String KUNDERA_ES_REFRESH_INDEXES = "kundera.es.refresh.indexes";
 }

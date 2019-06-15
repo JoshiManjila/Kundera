@@ -461,7 +461,7 @@ public abstract class QueryImpl<E> implements Query, com.impetus.kundera.query.Q
     private List populateUsingElasticSearch(Client client, EntityMetadata m)
     {
         Map<String, Object> searchFilter = client.getIndexManager().search(kunderaMetadata, kunderaQuery,
-                persistenceDelegeator, m, this.maxResult);
+                persistenceDelegeator, m, this.firstResult, this.maxResult);
         Object[] primaryKeys = ((Map<String, Object>) searchFilter.get(Constants.PRIMARY_KEYS)).values().toArray(
                 new Object[] {});
         Map<String, Object> aggregations = (Map<String, Object>) searchFilter.get(Constants.AGGREGATIONS);
@@ -1374,8 +1374,8 @@ public abstract class QueryImpl<E> implements Query, com.impetus.kundera.query.Q
     {
         EntityMetadata metadata = getEntityMetadata();
         Client client = persistenceDelegeator.getClient(metadata);
-        List results = isRelational(metadata) && !kunderaQuery.isNative() ? recursivelyPopulateEntities(metadata,
-                client) : populateEntities(metadata, client);
+        List results = isRelational(metadata) ? recursivelyPopulateEntities(metadata, client) : populateEntities(
+                metadata, client);
         return results;
     }
 

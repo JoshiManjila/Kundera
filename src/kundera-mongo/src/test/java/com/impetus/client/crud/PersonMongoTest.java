@@ -39,10 +39,15 @@ import com.impetus.client.crud.entities.PersonMongo.Month;
 import com.impetus.client.utils.MongoUtils;
 import com.impetus.kundera.client.Client;
 import com.mongodb.BasicDBList;
+import com.mongodb.BasicDBObject;
 
+/**
+ * The Class PersonMongoTest.
+ */
 public class PersonMongoTest extends BaseTest
 {
 
+    /** The Constant _PU. */
     private static final String _PU = "mongoTest";
 
     /** The emf. */
@@ -51,6 +56,7 @@ public class PersonMongoTest extends BaseTest
     /** The em. */
     private static EntityManager em;
 
+    /** The col. */
     private Map<Object, Object> col;
 
     /**
@@ -69,6 +75,9 @@ public class PersonMongoTest extends BaseTest
 
     /**
      * On insert mongo.
+     * 
+     * @throws Exception
+     *             the exception
      */
     @Test
     public void onInsertMongo() throws Exception
@@ -158,6 +167,9 @@ public class PersonMongoTest extends BaseTest
 
     }
 
+    /**
+     * Select id query.
+     */
     private void selectIdQuery()
     {
         String query = "select p.personId from PersonMongo p";
@@ -270,6 +282,9 @@ public class PersonMongoTest extends BaseTest
 
     /**
      * On merge mongo.
+     * 
+     * @throws Exception
+     *             the exception
      */
     @Test
     public void onMergeMongo() throws Exception
@@ -316,21 +331,20 @@ public class PersonMongoTest extends BaseTest
 
     }
 
+    /**
+     * On execute script.
+     */
     private void onExecuteScript()
     {
 
         Map<String, Client<Query>> clients = (Map<String, Client<Query>>) em.getDelegate();
         Client client = clients.get(_PU);
 
-        String script = "db.system.js.save({ _id: \"echoFunction\",value : function(x) { return x; }})";
-        Object result = (client).executeScript(script);
-        Assert.assertNull(result);
-
         /*
          * To find a single document from DB
          */
-        script = "db.PERSON.findOne()";
-        result = (client).executeScript(script);
+        String script = "db.PERSON.findOne()";
+        Object result = (client).executeScript(script);
         Assert.assertNotNull(result);
 
         /*
@@ -384,6 +398,9 @@ public class PersonMongoTest extends BaseTest
 
     }
 
+    /**
+     * On execute native query.
+     */
     private void onExecuteNativeQuery()
     {
 
@@ -607,6 +624,9 @@ public class PersonMongoTest extends BaseTest
         Assert.assertEquals("dev", list.get(0).getPersonName());
     }
 
+    /**
+     * Increment function test.
+     */
     @Test
     public void incrementFunctionTest()
     {
@@ -648,6 +668,9 @@ public class PersonMongoTest extends BaseTest
         Assert.assertEquals(new Integer(13), results.get(0).getAge());
     }
 
+    /**
+     * Sub query test.
+     */
     @Test
     public void subQueryTest()
     {
@@ -695,6 +718,9 @@ public class PersonMongoTest extends BaseTest
 
     }
 
+    /**
+     * Inter clause operator test.
+     */
     @Test
     public void interClauseOperatorTest()
     {
@@ -719,7 +745,8 @@ public class PersonMongoTest extends BaseTest
         q.setParameter("personId", "1");
         List<PersonMongo> results = q.getResultList();
         Assert.assertNotNull(results);
-        Assert.assertEquals(0, results.size());
+        Assert.assertEquals(1, results.size());
+        Assert.assertEquals("1", results.get(0).getPersonId());
 
         query = "Select p from PersonMongo p where (p.personName = :name AND p.age NOT IN :ageList)"
                 + " OR (p.personId = :personId)";
@@ -761,6 +788,9 @@ public class PersonMongoTest extends BaseTest
 
     }
 
+    /**
+     * Pagination query test.
+     */
     @Test
     public void paginationQueryTest()
     {
@@ -801,4 +831,228 @@ public class PersonMongoTest extends BaseTest
         Assert.assertNotNull(results.get(0).getAge());
 
     }
+
+    /**
+     * Map reduce test (simple).
+     */
+    @Test
+    public void mapReduceTest()
+    {
+        String query = "db.PERSON.mapReduce(\n" + "  function () { emit( this.AGE - this.AGE % 10, 1 ); },\n"
+                + "  function (key, values) { return { age: key, count: Array.sum(values) }; },\n"
+                + "  { query: {}, out: { inline: 1 } }\n" + ")";
+
+        executeMapReduceTest(query);
+    }
+
+    /**
+     * Map reduce test (with db.getCollection(..)).
+     */
+    @Test
+    public void mapReduceTestWithGetCollection()
+    {
+        String query = "db.getCollection('PERSON').mapReduce(\n"
+                + "  function () { emit( this.AGE - this.AGE % 10, 1 ); },\n"
+                + "  function (key, values) { return { age: key, count: Array.sum(values) }; },\n"
+                + "  { query: {}, out: { inline: 1 } }\n" + ")";
+
+        executeMapReduceTest(query);
+
+        query = "db.getCollection(\"PERSON\").mapReduce(\n"
+                + "  function () { emit( this.AGE - this.AGE % 10, 1 ); },\n"
+                + "  function (key, values) { return { age: key, count: Array.sum(values) }; },\n"
+                + "  { query: {}, out: { inline: 1 } }\n" + ")";
+
+        executeMapReduceTest(query);
+    }
+
+    @Test
+    public void testUpperAndLower()
+    {
+        Object p1 = prepareMongoInstance("alexander", 10);
+        Object p2 = prepareMongoInstance("sandra", 20);
+        Object p3 = prepareMongoInstance("CASSANDRA", 15);
+        em.persist(p1);
+        em.persist(p2);
+        em.persist(p3);
+
+        String query = "Select p from PersonMongo p where UPPER(p.personId) = 'SANDRA'";
+        Query q = em.createQuery(query);
+        List<PersonMongo> results = q.getResultList();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(1, results.size());
+
+        query = "Select p from PersonMongo p where LOWER(p.personId) = 'cassandra'";
+        q = em.createQuery(query);
+        results = q.getResultList();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(1, results.size());
+
+        query = "Select p from PersonMongo p where LOWER(p.personId) IN ('sandra', 'cassandra')";
+        q = em.createQuery(query);
+        results = q.getResultList();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(2, results.size());
+
+        query = "Select p from PersonMongo p where LOWER(p.personId) NOT IN ('sandra', 'cassandra')";
+        q = em.createQuery(query);
+        results = q.getResultList();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(1, results.size());
+
+        query = "Select p from PersonMongo p where UPPER(p.personId) <> 'ALEXANDER'";
+        q = em.createQuery(query);
+        results = q.getResultList();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(2, results.size());
+    }
+
+    @Test
+    public void testLikeAndUpperLower()
+    {
+        Object p1 = prepareMongoInstance("alexander", 10);
+        Object p2 = prepareMongoInstance("sandra", 20);
+        Object p3 = prepareMongoInstance("CASSANDRA", 15);
+        em.persist(p1);
+        em.persist(p2);
+        em.persist(p3);
+
+        String query = "Select p from PersonMongo p where p.personId LIKE '%and%'";
+        Query q = em.createQuery(query);
+        List<PersonMongo> results = q.getResultList();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(2, results.size());
+
+        query = "Select p from PersonMongo p where UPPER(p.personId) LIKE '%and%'";
+        q = em.createQuery(query);
+        results = q.getResultList();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(3, results.size());
+
+        query = "Select p from PersonMongo p where LOWER(p.personId) LIKE '%and%'";
+        q = em.createQuery(query);
+        results = q.getResultList();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(3, results.size());
+    }
+
+    @Test
+    public void testNotLike()
+    {
+        Object p1 = prepareMongoInstance("alexander", 10);
+        Object p2 = prepareMongoInstance("sandra", 20);
+        Object p3 = prepareMongoInstance("CASSANDRA", 15);
+        em.persist(p1);
+        em.persist(p2);
+        em.persist(p3);
+
+        String query = "Select p from PersonMongo p where p.personId NOT LIKE '%andr%'";
+        Query q = em.createQuery(query);
+        List<PersonMongo> results = q.getResultList();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(2, results.size());
+
+        query = "Select p from PersonMongo p where p.personId NOT LIKE '%andr%' AND p.personId = 'alexander'";
+        q = em.createQuery(query);
+        results = q.getResultList();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(1, results.size());
+
+        query = "Select p from PersonMongo p where p.personId = 'alexander' AND p.personId NOT LIKE '%andr%'";
+        q = em.createQuery(query);
+        results = q.getResultList();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(1, results.size());
+
+        query = "Select p from PersonMongo p where p.personId LIKE '%lex%' AND p.personId NOT LIKE 'cass%'";
+        q = em.createQuery(query);
+        results = q.getResultList();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(1, results.size());
+    }
+
+    /**
+     * Execute map reduce test.
+     * 
+     * @param query
+     *            the query
+     */
+    private void executeMapReduceTest(String query)
+    {
+        Object p1 = prepareMongoInstance("1", 10);
+        Object p2 = prepareMongoInstance("2", 20);
+        Object p3 = prepareMongoInstance("3", 15);
+        Object p4 = prepareMongoInstance("4", 12);
+        Object p5 = prepareMongoInstance("5", 19);
+        Object p6 = prepareMongoInstance("6", 23);
+        em.persist(p1);
+        em.persist(p2);
+        em.persist(p3);
+        em.persist(p4);
+        em.persist(p5);
+        em.persist(p6);
+
+        Query q = em.createNativeQuery(query);
+        List<BasicDBObject> results = q.getResultList();
+
+        Assert.assertNotNull(results);
+        Assert.assertEquals(2, results.size());
+
+        for (BasicDBObject item : results)
+        {
+            Assert.assertTrue(item.containsField("value"));
+
+            BasicDBObject value = (BasicDBObject) item.get("value");
+
+            Assert.assertTrue(value.containsField("age"));
+            Assert.assertTrue(value.containsField("count"));
+
+            int age = value.getInt("age");
+            int count = value.getInt("count");
+
+            if (age == 10)
+            {
+                Assert.assertEquals(4, count);
+            }
+            else if (age == 20)
+            {
+                Assert.assertEquals(2, count);
+            }
+            else
+            {
+                Assert.fail("Unexpected result");
+            }
+        }
+    }
+
+    /**
+     * Count test.
+     */
+    @Test
+    public void countTest()
+    {
+        Object p1 = prepareMongoInstance("1", 10);
+        Object p2 = prepareMongoInstance("2", 20);
+        Object p3 = prepareMongoInstance("3", 15);
+        em.persist(p1);
+        em.persist(p2);
+        em.persist(p3);
+
+        Query query = em.createQuery("select count(p) from PersonMongo p");
+        List<?> results = query.getResultList();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(results.size(), 1);
+        Assert.assertEquals(results.get(0), 3L);
+
+        query = em.createQuery("select count(p) from PersonMongo p where p.age < 18");
+        results = query.getResultList();
+        Assert.assertNotNull(results);
+        Assert.assertEquals(results.size(), 1);
+        Assert.assertEquals(results.get(0), 2L);
+
+        query = em.createQuery("select count(p) from PersonMongo p");
+        Object singleResult = query.getSingleResult();
+        Assert.assertEquals(singleResult, 3L);
+    }
+
 }

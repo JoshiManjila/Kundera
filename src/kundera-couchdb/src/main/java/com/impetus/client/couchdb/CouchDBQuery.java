@@ -18,6 +18,7 @@ package com.impetus.client.couchdb;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Queue;
 
 import javax.persistence.Query;
@@ -25,9 +26,21 @@ import javax.persistence.metamodel.Attribute;
 import javax.persistence.metamodel.EmbeddableType;
 import javax.persistence.metamodel.EntityType;
 
+import org.eclipse.persistence.jpa.jpql.parser.AvgFunction;
+import org.eclipse.persistence.jpa.jpql.parser.CountFunction;
+import org.eclipse.persistence.jpa.jpql.parser.Expression;
+import org.eclipse.persistence.jpa.jpql.parser.MaxFunction;
+import org.eclipse.persistence.jpa.jpql.parser.MinFunction;
+import org.eclipse.persistence.jpa.jpql.parser.NullExpression;
+import org.eclipse.persistence.jpa.jpql.parser.SelectClause;
+import org.eclipse.persistence.jpa.jpql.parser.SelectStatement;
+import org.eclipse.persistence.jpa.jpql.parser.StateFieldPathExpression;
+import org.eclipse.persistence.jpa.jpql.parser.SumFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.impetus.kundera.Constants;
+import com.impetus.kundera.KunderaException;
 import com.impetus.kundera.client.Client;
 import com.impetus.kundera.client.ClientBase;
 import com.impetus.kundera.client.EnhanceEntity;
@@ -42,6 +55,7 @@ import com.impetus.kundera.persistence.PersistenceDelegator;
 import com.impetus.kundera.property.PropertyAccessorHelper;
 import com.impetus.kundera.query.KunderaQuery;
 import com.impetus.kundera.query.KunderaQuery.FilterClause;
+import com.impetus.kundera.query.KunderaQueryUtils;
 import com.impetus.kundera.query.QueryHandlerException;
 import com.impetus.kundera.query.QueryImpl;
 
@@ -53,8 +67,23 @@ import com.impetus.kundera.query.QueryImpl;
  */
 public class CouchDBQuery extends QueryImpl
 {
+
+    /** The use lucene or es. */
+    private boolean useLuceneOrES;
+
+    /** The Constant log. */
     private static final Logger log = LoggerFactory.getLogger(CouchDBQuery.class);
 
+    /**
+     * Instantiates a new couch db query.
+     * 
+     * @param kunderaQuery
+     *            the kundera query
+     * @param persistenceDelegator
+     *            the persistence delegator
+     * @param kunderaMetadata
+     *            the kundera metadata
+     */
     public CouchDBQuery(KunderaQuery kunderaQuery, PersistenceDelegator persistenceDelegator,
             final KunderaMetadata kunderaMetadata)
     {
@@ -63,14 +92,19 @@ public class CouchDBQuery extends QueryImpl
 
     /**
      * Populate results.
+     * 
+     * @param m
+     *            the m
+     * @param client
+     *            the client
+     * @return the list
      */
     @Override
     protected List populateEntities(EntityMetadata m, Client client)
     {
-
         ClientMetadata clientMetadata = ((ClientBase) client).getClientMetadata();
-
-        if (!MetadataUtils.useSecondryIndex(clientMetadata) && (clientMetadata.getIndexImplementor() != null))
+        this.useLuceneOrES = !MetadataUtils.useSecondryIndex(clientMetadata);
+        if (useLuceneOrES)
         {
             return populateUsingLucene(m, client, null, kunderaQuery.getResult());
         }
@@ -83,33 +117,58 @@ public class CouchDBQuery extends QueryImpl
 
     /**
      * Recursively populate entity.
+     * 
+     * @param m
+     *            the m
+     * @param client
+     *            the client
+     * @return the list
      */
     @Override
     protected List recursivelyPopulateEntities(EntityMetadata m, Client client)
     {
-        List<EnhanceEntity> ls = new ArrayList<EnhanceEntity>();
-        ls = populateEntities(m, client);
+        List<EnhanceEntity> ls = populateEntities(m, client);
         return setRelationEntities(ls, client, m);
     }
 
+    /*
+     * (non-Javadoc)
+     * 
+     * @see com.impetus.kundera.query.QueryImpl#executeUpdate()
+     */
     @Override
     public int executeUpdate()
     {
         return super.executeUpdate();
     }
 
+    /*
+     * (non-Javadoc)
+     * 
+     * @see com.impetus.kundera.query.QueryImpl#getReader()
+     */
     @Override
     protected EntityReader getReader()
     {
         return new CouchDBEntityReader(kunderaQuery, kunderaMetadata);
     }
 
+    /*
+     * (non-Javadoc)
+     * 
+     * @see com.impetus.kundera.query.QueryImpl#onExecuteUpdate()
+     */
     @Override
     protected int onExecuteUpdate()
     {
         return onUpdateDeleteEvent();
     }
 
+    /*
+     * (non-Javadoc)
+     * 
+     * @see com.impetus.kundera.query.QueryImpl#close()
+     */
     @Override
     public void close()
     {
@@ -117,12 +176,22 @@ public class CouchDBQuery extends QueryImpl
 
     }
 
+    /*
+     * (non-Javadoc)
+     * 
+     * @see com.impetus.kundera.query.QueryImpl#setMaxResults(int)
+     */
     @Override
     public Query setMaxResults(int maxResult)
     {
         return super.setMaxResults(maxResult);
     }
 
+    /*
+     * (non-Javadoc)
+     * 
+     * @see com.impetus.kundera.query.QueryImpl#iterate()
+     */
     @Override
     public Iterator iterate()
     {
@@ -132,21 +201,28 @@ public class CouchDBQuery extends QueryImpl
     }
 
     /**
+     * On translation.
      * 
      * @param clauseQueue
+     *            the clause queue
      * @param m
-     * @return
+     *            the m
+     * @return the couch db query interpreter
      */
     private CouchDBQueryInterpreter onTranslation(Queue clauseQueue, EntityMetadata m)
     {
 
         CouchDBQueryInterpreter interpreter = new CouchDBQueryInterpreter(getColumns(getKunderaQuery().getResult(), m),
                 getMaxResults(), m);
+        interpreter.setColumnsToOutput(getColumnsToOutput(m, kunderaQuery));
         MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata().getMetamodel(
                 m.getPersistenceUnit());
 
         EntityType entity = metaModel.entity(m.getEntityClazz());
-
+        if (getKunderaQuery().isAggregated() && !useLuceneOrES)
+        {
+            return onAggregatedQuery(m, interpreter, getKunderaQuery());
+        }
         // If there is no clause present, means we might need to scan complete
         // table.
         /**
@@ -256,6 +332,112 @@ public class CouchDBQuery extends QueryImpl
         return interpreter;
     }
 
+    /**
+     * On aggregated query.
+     * 
+     * @param m
+     *            the m
+     * @param interpreter
+     *            the interpreter
+     * @param kunderaQuery
+     *            the kundera query
+     * @return the couch db query interpreter
+     */
+    private CouchDBQueryInterpreter onAggregatedQuery(EntityMetadata m, CouchDBQueryInterpreter interpreter,
+            KunderaQuery kunderaQuery)
+    {
+        interpreter.setAggregation(true);
+        SelectStatement selectStatement = kunderaQuery.getSelectStatement();
+        Expression whereClause = selectStatement.getWhereClause();
+        if (!NullExpression.class.isAssignableFrom(whereClause.getClass()))
+        {
+            throw new KunderaException("Aggregations with where clause are yet not supported in CouchDB");
+        }
+        SelectClause selectClause = (SelectClause) selectStatement.getSelectClause();
+        Expression expression = selectClause.getSelectExpression();
+        if (CountFunction.class.isAssignableFrom(expression.getClass()))
+        {
+            interpreter.setAggregationType(CouchDBConstants.COUNT);
+            Expression exp = ((CountFunction) expression).getExpression();
+            setAggregationColInInterpreter(m, interpreter, exp);
+        }
+        else if (MinFunction.class.isAssignableFrom(expression.getClass()))
+        {
+            interpreter.setAggregationType(CouchDBConstants.MIN);
+            Expression exp = ((MinFunction) expression).getExpression();
+            setAggregationColInInterpreter(m, interpreter, exp);
+        }
+        else if (MaxFunction.class.isAssignableFrom(expression.getClass()))
+        {
+            interpreter.setAggregationType(CouchDBConstants.MAX);
+            Expression exp = ((MaxFunction) expression).getExpression();
+            setAggregationColInInterpreter(m, interpreter, exp);
+        }
+        else if (AvgFunction.class.isAssignableFrom(expression.getClass()))
+        {
+            interpreter.setAggregationType(CouchDBConstants.AVG);
+            Expression exp = ((AvgFunction) expression).getExpression();
+            setAggregationColInInterpreter(m, interpreter, exp);
+        }
+        else if (SumFunction.class.isAssignableFrom(expression.getClass()))
+        {
+            interpreter.setAggregationType(CouchDBConstants.SUM);
+            Expression exp = ((SumFunction) expression).getExpression();
+            setAggregationColInInterpreter(m, interpreter, exp);
+        }
+        else
+        {
+            throw new KunderaException("This query is currently not supported in CouchDB");
+        }
+        return interpreter;
+    }
+
+    /**
+     * Sets the aggregation col in interpreter.
+     * 
+     * @param m
+     *            the m
+     * @param interpreter
+     *            the interpreter
+     * @param exp
+     *            the exp
+     */
+    private void setAggregationColInInterpreter(EntityMetadata m, CouchDBQueryInterpreter interpreter, Expression exp)
+    {
+        if (StateFieldPathExpression.class.isAssignableFrom(exp.getClass()))
+        {
+            Map<String, Object> map = KunderaQueryUtils.setFieldClazzAndColumnFamily(exp, m, kunderaMetadata);
+            interpreter.setAggregationColumn((String) map.get(Constants.COL_NAME));
+        }
+    }
+
+    /**
+     * Gets the columns to output.
+     * 
+     * @param m
+     *            the m
+     * @param kunderaQuery
+     *            the kundera query
+     * @return the columns to output
+     */
+    private List<Map<String, Object>> getColumnsToOutput(EntityMetadata m, KunderaQuery kunderaQuery)
+    {
+        if (kunderaQuery.isSelectStatement())
+        {
+            SelectStatement selectStatement = kunderaQuery.getSelectStatement();
+            SelectClause selectClause = (SelectClause) selectStatement.getSelectClause();
+            return KunderaQueryUtils.readSelectClause(selectClause.getSelectExpression(), m, false, kunderaMetadata);
+        }
+        return new ArrayList();
+    }
+
+    /*
+     * (non-Javadoc)
+     * 
+     * @see
+     * com.impetus.kundera.query.QueryImpl#findUsingLucene(com.impetus.kundera
+     * .metadata.model.EntityMetadata, com.impetus.kundera.client.Client)
+     */
     @Override
     protected List findUsingLucene(EntityMetadata m, Client client)
     {

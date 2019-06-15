@@ -10,11 +10,11 @@
 
 	<groupId>com.impetus</groupId>
 	<artifactId>kundera-parent</artifactId>
-	<version>3.0-SNAPSHOT</version>
+	<version>3.14-SNAPSHOT</version>
 	<packaging>pom</packaging>
 
 	<name>kundera</name>
-	<url>https://github.com/impetus-opensource/Kundera</url>
+	<url>https://github.com/Impetus/Kundera</url>
 
 	<licenses>
 		<license>
@@ -25,10 +25,11 @@
 	</licenses>
 
 	<scm>
-		<connection>scm:git:git@github.com:impetus-opensource/Kundera.git</connection>
-		<developerConnection>scm:git:git@github.com:impetus-opensource/Kundera.git</developerConnection>
-		<url>git@github.com:impetus-opensource/Kundera.git</url>
-	</scm>
+		<connection>scm:git:git@github.com:Impetus/Kundera.git</connection>
+		<developerConnection>scm:git:git@github.com:Impetus/Kundera.git</developerConnection>
+		<url>git@github.com:Impetus/Kundera.git</url>
+	  <tag>HEAD</tag>
+  </scm>
 
 	<developers>
 		<developer>
@@ -37,34 +38,14 @@
 			<email>vivek.mishra@impetus.co.in</email>
 		</developer>
 		<developer>
-			<id>chhavigangwal</id>
-			<name>Chhavi Gangwal</name>
-			<email>chhavi.gangwal@impetus.co.in</email>
-		</developer>
-		<developer>
-			<id>amit-kr</id>
-			<name>Amit Kumar</name>
-			<email>amitr.kumar@impetus.co.in</email>
-		</developer>
-		<developer>
 			<id>devender-yadav</id>
 			<name>Devender Yadav</name>
-			<email>devdner.yadav@impetus.co.in</email>
+			<email>devender.yadav@impetus.co.in</email>
 		</developer>
 		<developer>
 			<id>karthikprasad13</id>
-			<name>Karthik Prasad Machala</name>
+			<name>Karthik Prasad Manchala</name>
 			<email>karthikp.manchala@impetus.co.in</email>
-		</developer>
-		<developer>
-			<id>pragalbhgarg</id>
-			<name>Pragalbh Garg</name>
-			<email>pragalbh.garg@impetus.co.in</email>
-		</developer>
-		<developer>
-			<id>Kuldeep.mishra</id>
-			<name>Kuldeep Kumar Mishra</name>
-			<email>kuldeep.mishra@impetus.co.in</email>
 		</developer>
 	</developers>
 
@@ -77,7 +58,7 @@
 		<sonar.language>java</sonar.language>
 	</properties>
 
-
+	<!--
 	<repositories>
 		<repository>
 			<id>clover</id>
@@ -114,7 +95,8 @@
 				<enabled>true</enabled>
 			</snapshots>
 		</repository>
-	</repositories>
+	</repositories> -->
+
 	<!-- Build profiles -->
 	<profiles>
 
@@ -142,6 +124,35 @@
 			</modules>
 		</profile>
 
+	<!-- Profile to sign artifacts -->
+
+		<profile>
+      			<id>release-sign-artifacts</id>
+      			<activation>
+				<property>
+          				<name>performRelease</name>
+         				 <value>true</value>
+       				 </property>
+      			</activation>
+     			 <build>
+				<plugins>
+					<plugin>
+         				   <groupId>org.apache.maven.plugins</groupId>
+         				   <artifactId>maven-gpg-plugin</artifactId>
+         				   <executions>
+              					<execution>
+               						<id>sign-artifacts</id>
+							<phase>verify</phase>
+           						<goals>
+                  						<goal>sign</goal>
+                					</goals>
+              					</execution>
+            				   </executions>
+          				</plugin>
+        			</plugins>
+      			</build>
+    		</profile>
+
 	</profiles>
 
 	<build>
@@ -150,7 +161,10 @@
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-release-plugin</artifactId>
-				<version>2.2.1</version>
+				<version>2.5.2</version>
+				<configuration>
+				        <arguments>-DskipTests</arguments>
+			        </configuration>
 				<executions>
 					<execution>
 						<id>default</id>
@@ -163,8 +177,9 @@
 					</execution>
 				</executions>
 			</plugin>
-
+			
 		</plugins>
 	</build>
 
 </project>
+

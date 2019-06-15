@@ -37,7 +37,6 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import com.datastax.driver.core.DataType.Name;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.UDTValue;
-//import com.datastax.driver.core.UserType;
 import com.impetus.client.cassandra.schemamanager.CassandraDataTranslator;
 import com.impetus.client.cassandra.schemamanager.CassandraDataTranslator.CassandraType;
 import com.impetus.client.cassandra.schemamanager.CassandraValidationClassMapper;
@@ -61,15 +60,23 @@ public final class DSClientUtilities
     /**
      * assign value to provided entity instance else return value of mapped java
      * type.
-     *
-     * @param row            DS row
-     * @param entity            JPA entity
-     * @param metadata            entity's metadata
-     * @param dataType            data type
-     * @param entityType            entity type from metamodel
-     * @param columnName            jpa column name
-     * @param member the member
-     * @param metamodel the metamodel
+     * 
+     * @param row
+     *            DS row
+     * @param entity
+     *            JPA entity
+     * @param metadata
+     *            entity's metadata
+     * @param dataType
+     *            data type
+     * @param entityType
+     *            entity type from metamodel
+     * @param columnName
+     *            jpa column name
+     * @param member
+     *            the member
+     * @param metamodel
+     *            the metamodel
      * @return modified entity instance with data type value. If entity is null
      *         then returns value of mapped java class.
      */
@@ -118,7 +125,11 @@ public final class DSClientUtilities
          * }
          */
         Object retVal = null;
-
+        
+        if(row.isNull(columnName)){
+        	return entity;
+        }
+        
         switch (dataType)
         {
         case BLOB:
@@ -127,45 +138,38 @@ public final class DSClientUtilities
             if (member != null && retVal != null && entity != null)
             {
                 PropertyAccessorHelper.set(entity, member, ((ByteBuffer) retVal).array());
-                // setFieldValue(entity, member, retVal);
             }
             break;
 
         case BOOLEAN:
             retVal = row.getBool(columnName);
             setFieldValue(entity, member, retVal);
-            // PropertyAccessorHelper.set(entity, member, retVal);
             break;
 
         case BIGINT:
         case COUNTER:
             retVal = row.getLong(columnName);
             setFieldValue(entity, member, retVal);
-            // PropertyAccessorHelper.set(entity, member, retVal);
             break;
 
         case DECIMAL:
             retVal = row.getDecimal(columnName);
             setFieldValue(entity, member, retVal);
-            // PropertyAccessorHelper.set(entity, member, retVal);
             break;
 
         case DOUBLE:
             retVal = row.getDouble(columnName);
             setFieldValue(entity, member, retVal);
-            // PropertyAccessorHelper.set(entity, member, retVal);
             break;
 
         case FLOAT:
             retVal = row.getFloat(columnName);
             setFieldValue(entity, member, retVal);
-            // PropertyAccessorHelper.set(entity, member, retVal);
             break;
 
         case INET:
             retVal = row.getInet(columnName);
             setFieldValue(entity, member, retVal);
-            // PropertyAccessorHelper.set(entity, member, retVal);
             break;
 
         case INT:
@@ -183,7 +187,7 @@ public final class DSClientUtilities
             break;
 
         case TIMESTAMP:
-            retVal = row.getDate(columnName);
+            retVal = row.getTimestamp(columnName);
             if (retVal != null && member != null)
                 retVal = CassandraDataTranslator.decompose(member.getType(),
                         ByteBufferUtil.bytes(((Date) retVal).getTime()).array(), true);
@@ -230,16 +234,13 @@ public final class DSClientUtilities
                             metamodel));
                 }
             }
-            // retVal = row.getList(columnName,
-            // listAttributeTypeClass.isAssignableFrom(byte[].class)?
-            // ByteBuffer.class:listAttributeTypeClass);
 
             if (retVal != null && !((List) retVal).isEmpty() && !isElementCollectionList)
             {
                 if (listAttributeTypeClass.isAssignableFrom(byte[].class))
                 {
-                    PropertyAccessorHelper.set(entity, member, CassandraDataTranslator.marshalCollection(
-                            BytesType.class, (Collection) retVal, listAttributeTypeClass, ArrayList.class));
+                    setFieldValue(entity, member, CassandraDataTranslator.marshalCollection(BytesType.class,
+                            (Collection) retVal, listAttributeTypeClass, ArrayList.class));
                 }
                 else
                 {
@@ -248,21 +249,18 @@ public final class DSClientUtilities
                     {
                         resultList.add(collectionItems.next());
                     }
-                    PropertyAccessorHelper.set(entity, member, resultList);
+                    setFieldValue(entity, member, resultList);
                 }
 
             }
             else if (retVal != null && !((Collection) retVal).isEmpty())
             {
-                PropertyAccessorHelper.set(entity, member, resultList);
+                setFieldValue(entity, member, resultList);
             }
             break;
 
         case SET:
             Class setAttributeTypeClass = PropertyAccessorHelper.getGenericClass(member);
-            // retVal = row.getList(columnName,
-            // setAttributeTypeClass.isAssignableFrom(byte[].class)?
-            // ByteBuffer.class:setAttributeTypeClass);
             Class setClazz = null;
             boolean isElementCollectionSet = false;
             if (setAttributeTypeClass.isAssignableFrom(byte[].class))
@@ -291,15 +289,12 @@ public final class DSClientUtilities
                 }
             }
 
-            // retVal = row.getSet(columnName,
-            // setAttributeTypeClass.isAssignableFrom(byte[].class)?
-            // ByteBuffer.class:setAttributeTypeClass);
             if (retVal != null && !((Set) retVal).isEmpty() && !isElementCollectionSet)
             {
                 if (setAttributeTypeClass.isAssignableFrom(byte[].class))
                 {
-                    PropertyAccessorHelper.set(entity, member, CassandraDataTranslator.marshalCollection(
-                            BytesType.class, (Collection) retVal, setAttributeTypeClass, HashSet.class));
+                    setFieldValue(entity, member, CassandraDataTranslator.marshalCollection(BytesType.class,
+                            (Collection) retVal, setAttributeTypeClass, HashSet.class));
                 }
                 else
                 {
@@ -308,14 +303,13 @@ public final class DSClientUtilities
                     {
                         resultSet.add(collectionItems.next());
                     }
-                    PropertyAccessorHelper.set(entity, member, resultSet);
+                    setFieldValue(entity, member, resultSet);
                 }
             }
             else if (retVal != null && !((Collection) retVal).isEmpty())
             {
-                PropertyAccessorHelper.set(entity, member, resultSet);
+                setFieldValue(entity, member, resultSet);
             }
-            // PropertyAccessorHelper.set(entity, member, retVal);
             break;
         /*
          * ASCII, BIGINT, BLOB, BOOLEAN, COUNTER, DECIMAL, DOUBLE, FLOAT, INET,
@@ -324,6 +318,11 @@ public final class DSClientUtilities
          */
         case MAP:
             List<Class<?>> mapGenericClasses = PropertyAccessorHelper.getGenericClasses(member);
+            
+            if(mapGenericClasses.isEmpty()){
+            	//TODO: get map types from column metadata where member is null (Scalar queries)
+            	break;
+            }
 
             Class keyClass = CassandraValidationClassMapper.getValidationClassInstance(mapGenericClasses.get(0), true);
             Class valueClass = CassandraValidationClassMapper
@@ -362,17 +361,6 @@ public final class DSClientUtilities
                 }
             }
 
-            // retVal = row.getMap(columnName,
-            // mapGenericClasses.get(0).isAssignableFrom(byte[].class) ?
-            // ByteBuffer.class
-            // : mapGenericClasses.get(0), /*
-            // * mapGenericClasses.get(
-            // * 0),
-            // */
-            // mapGenericClasses.get(1).isAssignableFrom(byte[].class) ?
-            // ByteBuffer.class
-            // : mapGenericClasses.get(1));
-
             boolean isByteBuffer = mapGenericClasses.get(0).isAssignableFrom(byte[].class)
                     || mapGenericClasses.get(1).isAssignableFrom(byte[].class);
 
@@ -381,7 +369,7 @@ public final class DSClientUtilities
             {
                 if (isByteBuffer)
                 {
-                    PropertyAccessorHelper.set(entity, member,
+                    setFieldValue(entity, member,
                             CassandraDataTranslator.marshalMap(mapGenericClasses, keyClass, valueClass, (Map) retVal));
                 }
                 else
@@ -392,18 +380,18 @@ public final class DSClientUtilities
                         Object keyValue = keys.next();
                         resultMap.put(keyValue, ((Map) retVal).get(keyValue));
                     }
-                    PropertyAccessorHelper.set(entity, member, resultMap);
+                    setFieldValue(entity, member, resultMap);
                 }
             }
             else if (retVal != null && !((Map) retVal).isEmpty())
             {
-                PropertyAccessorHelper.set(entity, member, resultMap);
+                setFieldValue(entity, member, resultMap);
             }
             break;
         case UDT:
             retVal = row.getUDTValue(columnName);
-            PropertyAccessorHelper.set(entity, member,
-                    setUDTValue(entity, member.getType(), (UDTValue) retVal, metamodel));
+            setFieldValue(entity, member,
+                    retVal != null ? setUDTValue(entity, member.getType(), (UDTValue) retVal, metamodel) : null);
             break;
         }
 
@@ -412,11 +400,15 @@ public final class DSClientUtilities
 
     /**
      * Sets the udt value.
-     *
-     * @param entity the entity
-     * @param embeddedClass the embedded class
-     * @param udt the udt
-     * @param metaModel the meta model
+     * 
+     * @param entity
+     *            the entity
+     * @param embeddedClass
+     *            the embedded class
+     * @param udt
+     *            the udt
+     * @param metaModel
+     *            the meta model
      * @return the object
      */
     private static Object setUDTValue(Object entity, Class embeddedClass, UDTValue udt, MetamodelImpl metaModel)
@@ -431,13 +423,13 @@ public final class DSClientUtilities
             {
                 UDTValue subUDT = udt.getUDTValue(((AbstractAttribute) subAttribute).getJPAColumnName());
 
-                PropertyAccessorHelper.set(embeddedObject, embeddableColumn,
+                setFieldValue(embeddedObject, embeddableColumn,
                         setUDTValue(embeddedObject, embeddableColumn.getType(), subUDT, metaModel));
             }
             else
             {
-                setBasicValue(embeddedObject, embeddableColumn, ((AbstractAttribute) subAttribute).getJPAColumnName(), udt,
-                        CassandraDataTranslator.getCassandraDataTypeClass(embeddableColumn.getType()), metaModel);
+                setBasicValue(embeddedObject, embeddableColumn, ((AbstractAttribute) subAttribute).getJPAColumnName(),
+                        udt, CassandraDataTranslator.getCassandraDataTypeClass(embeddableColumn.getType()), metaModel);
             }
 
         }
@@ -447,17 +439,26 @@ public final class DSClientUtilities
 
     /**
      * Sets the basic value.
-     *
-     * @param entity the entity
-     * @param member the member
-     * @param columnName the column name
-     * @param row the row
-     * @param dataType the data type
-     * @param metamodel the metamodel
+     * 
+     * @param entity
+     *            the entity
+     * @param member
+     *            the member
+     * @param columnName
+     *            the column name
+     * @param row
+     *            the row
+     * @param dataType
+     *            the data type
+     * @param metamodel
+     *            the metamodel
      */
     private static void setBasicValue(Object entity, Field member, String columnName, UDTValue row,
             CassandraType dataType, MetamodelImpl metamodel)
     {
+    	if(row.isNull(columnName)){
+        	return;
+        }
         Object retVal = null;
         switch (dataType)
         {
@@ -466,46 +467,42 @@ public final class DSClientUtilities
             retVal = row.getBytes(columnName);
             if (retVal != null)
             {
-                PropertyAccessorHelper.set(entity, member, ((ByteBuffer) retVal).array());
-                // setFieldValue(entity, member, retVal);
+                setFieldValue(entity, member, ((ByteBuffer) retVal).array());
             }
             break;
 
         case BOOLEAN:
             retVal = row.getBool(columnName);
             setFieldValue(entity, member, retVal);
-            // PropertyAccessorHelper.set(entity, member, retVal);
             break;
 
         case BIGINT:
+            // bigints in embeddables and element collections are mapped/defined
+            // by Long
+        case LONG:
         case COUNTER:
             retVal = row.getLong(columnName);
             setFieldValue(entity, member, retVal);
-            // PropertyAccessorHelper.set(entity, member, retVal);
             break;
 
         case DECIMAL:
             retVal = row.getDecimal(columnName);
             setFieldValue(entity, member, retVal);
-            // PropertyAccessorHelper.set(entity, member, retVal);
             break;
 
         case DOUBLE:
             retVal = row.getDouble(columnName);
             setFieldValue(entity, member, retVal);
-            // PropertyAccessorHelper.set(entity, member, retVal);
             break;
 
         case FLOAT:
             retVal = row.getFloat(columnName);
             setFieldValue(entity, member, retVal);
-            // PropertyAccessorHelper.set(entity, member, retVal);
             break;
 
         case INET:
             retVal = row.getInet(columnName);
             setFieldValue(entity, member, retVal);
-            // PropertyAccessorHelper.set(entity, member, retVal);
             break;
 
         case INT:
@@ -531,7 +528,7 @@ public final class DSClientUtilities
             break;
 
         case TIMESTAMP:
-            retVal = row.getDate(columnName);
+            retVal = row.getTimestamp(columnName);
             if (retVal != null && member != null)
                 retVal = CassandraDataTranslator.decompose(member.getType(),
                         ByteBufferUtil.bytes(((Date) retVal).getTime()).array(), true);
@@ -573,16 +570,13 @@ public final class DSClientUtilities
                             metamodel));
                 }
             }
-            // retVal = row.getList(columnName,
-            // listAttributeTypeClass.isAssignableFrom(byte[].class)?
-            // ByteBuffer.class:listAttributeTypeClass);
 
             if (retVal != null && !((List) retVal).isEmpty() && !isElementCollectionList)
             {
                 if (listAttributeTypeClass.isAssignableFrom(byte[].class))
                 {
-                    PropertyAccessorHelper.set(entity, member, CassandraDataTranslator.marshalCollection(
-                            BytesType.class, (Collection) retVal, listAttributeTypeClass, ArrayList.class));
+                    setFieldValue(entity, member, CassandraDataTranslator.marshalCollection(BytesType.class,
+                            (Collection) retVal, listAttributeTypeClass, ArrayList.class));
                 }
                 else
                 {
@@ -591,21 +585,18 @@ public final class DSClientUtilities
                     {
                         resultList.add(collectionItems.next());
                     }
-                    PropertyAccessorHelper.set(entity, member, resultList);
+                    setFieldValue(entity, member, resultList);
                 }
 
             }
             else if (retVal != null && !((Collection) retVal).isEmpty())
             {
-                PropertyAccessorHelper.set(entity, member, resultList);
+                setFieldValue(entity, member, resultList);
             }
             break;
 
         case SET:
             Class setAttributeTypeClass = PropertyAccessorHelper.getGenericClass(member);
-            // retVal = row.getList(columnName,
-            // setAttributeTypeClass.isAssignableFrom(byte[].class)?
-            // ByteBuffer.class:setAttributeTypeClass);
             Class setClazz = null;
             boolean isElementCollectionSet = false;
             if (setAttributeTypeClass.isAssignableFrom(byte[].class))
@@ -634,15 +625,12 @@ public final class DSClientUtilities
                 }
             }
 
-            // retVal = row.getSet(columnName,
-            // setAttributeTypeClass.isAssignableFrom(byte[].class)?
-            // ByteBuffer.class:setAttributeTypeClass);
             if (retVal != null && !((Set) retVal).isEmpty() && !isElementCollectionSet)
             {
                 if (setAttributeTypeClass.isAssignableFrom(byte[].class))
                 {
-                    PropertyAccessorHelper.set(entity, member, CassandraDataTranslator.marshalCollection(
-                            BytesType.class, (Collection) retVal, setAttributeTypeClass, HashSet.class));
+                    setFieldValue(entity, member, CassandraDataTranslator.marshalCollection(BytesType.class,
+                            (Collection) retVal, setAttributeTypeClass, HashSet.class));
                 }
                 else
                 {
@@ -651,14 +639,13 @@ public final class DSClientUtilities
                     {
                         resultSet.add(collectionItems.next());
                     }
-                    PropertyAccessorHelper.set(entity, member, resultSet);
+                    setFieldValue(entity, member, resultSet);
                 }
             }
             else if (retVal != null && !((Collection) retVal).isEmpty())
             {
-                PropertyAccessorHelper.set(entity, member, resultSet);
+                setFieldValue(entity, member, resultSet);
             }
-            // PropertyAccessorHelper.set(entity, member, retVal);
             break;
         /*
          * ASCII, BIGINT, BLOB, BOOLEAN, COUNTER, DECIMAL, DOUBLE, FLOAT, INET,
@@ -705,17 +692,6 @@ public final class DSClientUtilities
                 }
             }
 
-            // retVal = row.getMap(columnName,
-            // mapGenericClasses.get(0).isAssignableFrom(byte[].class) ?
-            // ByteBuffer.class
-            // : mapGenericClasses.get(0), /*
-            // * mapGenericClasses.get(
-            // * 0),
-            // */
-            // mapGenericClasses.get(1).isAssignableFrom(byte[].class) ?
-            // ByteBuffer.class
-            // : mapGenericClasses.get(1));
-
             boolean isByteBuffer = mapGenericClasses.get(0).isAssignableFrom(byte[].class)
                     || mapGenericClasses.get(1).isAssignableFrom(byte[].class);
 
@@ -724,7 +700,7 @@ public final class DSClientUtilities
             {
                 if (isByteBuffer)
                 {
-                    PropertyAccessorHelper.set(entity, member,
+                    setFieldValue(entity, member,
                             CassandraDataTranslator.marshalMap(mapGenericClasses, keyClass, valueClass, (Map) retVal));
                 }
                 else
@@ -735,27 +711,25 @@ public final class DSClientUtilities
                         Object keyValue = keys.next();
                         resultMap.put(keyValue, ((Map) retVal).get(keyValue));
                     }
-                    PropertyAccessorHelper.set(entity, member, resultMap);
+                    setFieldValue(entity, member, resultMap);
                 }
             }
             else if (retVal != null && !((Map) retVal).isEmpty())
             {
-                PropertyAccessorHelper.set(entity, member, resultMap);
+                setFieldValue(entity, member, resultMap);
             }
             break;
-        // case UDT:
-        // retVal = row.getUDTValue(columnName);
-        // setUDTValue(entity, member, (UDTValue) retVal, metamodel);
-        // PropertyAccessorHelper.set(entity,member,retVal);
         }
 
     }
 
     /**
      * Sets the int value.
-     *
-     * @param member the member
-     * @param retVal the ret val
+     * 
+     * @param member
+     *            the member
+     * @param retVal
+     *            the ret val
      * @return the object
      */
     private static Object setIntValue(Field member, Object retVal)
@@ -776,10 +750,13 @@ public final class DSClientUtilities
 
     /**
      * Sets the text value.
-     *
-     * @param entity the entity
-     * @param member the member
-     * @param retVal the ret val
+     * 
+     * @param entity
+     *            the entity
+     * @param member
+     *            the member
+     * @param retVal
+     *            the ret val
      * @return the object
      */
     private static Object setTextValue(Object entity, Field member, Object retVal)
@@ -802,10 +779,13 @@ public final class DSClientUtilities
 
     /**
      * Sets the field value.
-     *
-     * @param entity the entity
-     * @param member the member
-     * @param retVal the ret val
+     * 
+     * @param entity
+     *            the entity
+     * @param member
+     *            the member
+     * @param retVal
+     *            the ret val
      */
     private static void setFieldValue(Object entity, Field member, Object retVal)
     {

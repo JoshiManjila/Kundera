@@ -4,13 +4,14 @@
 	<parent>
 		<artifactId>kundera</artifactId>
 		<groupId>com.impetus</groupId>
-		<version>3.0-SNAPSHOT</version>
+		<version>3.14-SNAPSHOT</version>
 	</parent>
 	<groupId>com.impetus.kundera.client</groupId>
 	<artifactId>kundera-rdbms</artifactId>
 	<packaging>jar</packaging>
 	<name>kundera-rdbms</name>
 	<url>http://maven.apache.org</url>
+
 	<dependencies>
 
 		<dependency>
@@ -45,14 +46,14 @@
 		<dependency>
 			<groupId>org.hibernate</groupId>
 			<artifactId>hibernate-core</artifactId>
-			<version>4.1.7.Final</version>
+			<version>5.2.5.Final</version>
 		</dependency>
 		<!-- <dependency> <groupId>org.hibernate</groupId> <artifactId>hibernate-entitymanager</artifactId> 
 			<version>4.1.7.Final</version> </dependency> -->
 		<dependency>
 			<groupId>org.hibernate</groupId>
 			<artifactId>hibernate-validator</artifactId>
-			<version>4.2.0.Final</version>
+			<version>5.3.4.Final</version>
 		</dependency>
 		<dependency>
 			<groupId>mysql</groupId>
@@ -62,14 +63,14 @@
 		<dependency>
 			<groupId>org.hibernate</groupId>
 			<artifactId>hibernate-c3p0</artifactId>
-			<version>4.1.7.Final</version>
+			<version>5.2.5.Final</version>
 		</dependency>
 		<!-- <dependency> <groupId>hsqldb</groupId> <artifactId>hsqldb</artifactId> 
 			<version>1.8.0.7</version> <scope>test</scope> </dependency> -->
 		<dependency>
 			<groupId>org.hsqldb</groupId>
 			<artifactId>hsqldb</artifactId>
-			<version>2.3.1</version>
+			<version>2.3.4</version>
 		</dependency>
 
 		<dependency>
@@ -118,7 +119,28 @@
 				code coverage. <destFile>${project.basedir}/../target/jacoco-it.exec</destFile> 
 				</configuration> <executions> <execution> <id>post-test</id> <configuration> 
 				<skip>true</skip> </configuration> </execution> </executions> </plugin> -->
+
+
 		</plugins>
 	</build>
+	<profiles>
+		<profile>
+			<id>doclint-java8-disable</id>
+			<activation>
+				<jdk>[1.8,)</jdk>
+			</activation>
 
+			<build>
+				<plugins>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-javadoc-plugin</artifactId>
+						<configuration>
+							<additionalparam>-Xdoclint:none</additionalparam>
+						</configuration>
+					</plugin>
+				</plugins>
+			</build>
+		</profile>
+	</profiles>
 </project>

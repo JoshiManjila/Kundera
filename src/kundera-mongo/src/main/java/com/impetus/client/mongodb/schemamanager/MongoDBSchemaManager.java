@@ -16,7 +16,6 @@
 
 package com.impetus.client.mongodb.schemamanager;
 
-import java.net.UnknownHostException;
 import java.util.List;
 import java.util.Map;
 
@@ -36,8 +35,6 @@ import com.impetus.kundera.configure.schema.SchemaGenerationException;
 import com.impetus.kundera.configure.schema.TableInfo;
 import com.impetus.kundera.configure.schema.api.AbstractSchemaManager;
 import com.impetus.kundera.configure.schema.api.SchemaManager;
-import com.impetus.kundera.loader.ClientLoaderException;
-import com.impetus.kundera.loader.KunderaAuthenticationException;
 import com.impetus.kundera.persistence.EntityManagerFactoryImpl.KunderaMetadata;
 import com.impetus.kundera.utils.KunderaCoreUtils;
 import com.mongodb.BasicDBObject;
@@ -45,6 +42,9 @@ import com.mongodb.DB;
 import com.mongodb.DBCollection;
 import com.mongodb.DBObject;
 import com.mongodb.MongoClient;
+import com.mongodb.MongoCredential;
+import com.mongodb.MongoException;
+import com.mongodb.ServerAddress;
 
 /**
  * The Class MongoDBSchemaManager manages auto schema operation
@@ -169,7 +169,7 @@ public class MongoDBSchemaManager extends AbstractSchemaManager implements Schem
                             + MongoDBUtils.CHUNKS, showQuery);
                 }
                 coll = db.createCollection(tableInfo.getTableName() + MongoDBUtils.FILES, options);
-                createUniqueIndex(coll, tableInfo.getIdColumnName());
+                createUniqueIndexGFS(coll, tableInfo.getIdColumnName());
                 KunderaCoreUtils.printQuery("Create collection: " + tableInfo.getTableName() + MongoDBUtils.FILES,
                         showQuery);
                 db.createCollection(tableInfo.getTableName() + MongoDBUtils.CHUNKS, options);
@@ -226,7 +226,7 @@ public class MongoDBSchemaManager extends AbstractSchemaManager implements Schem
                 if (!db.collectionExists(tableInfo.getTableName() + MongoDBUtils.FILES))
                 {
                     coll = db.createCollection(tableInfo.getTableName() + MongoDBUtils.FILES, options);
-                    createUniqueIndex(coll, tableInfo.getIdColumnName());
+                    createUniqueIndexGFS(coll, tableInfo.getIdColumnName());
                     KunderaCoreUtils.printQuery("Create collection: " + tableInfo.getTableName() + MongoDBUtils.FILES,
                             showQuery);
                 }
@@ -302,7 +302,6 @@ public class MongoDBSchemaManager extends AbstractSchemaManager implements Schem
      */
     protected boolean initiateClient()
     {
-        String message = null;
         for (String host : hosts)
         {
             if (host == null || !StringUtils.isNumeric(port) || port.isEmpty())
@@ -310,33 +309,24 @@ public class MongoDBSchemaManager extends AbstractSchemaManager implements Schem
                 logger.error("Host or port should not be null / port should be numeric");
                 throw new IllegalArgumentException("Host or port should not be null / port should be numeric");
             }
+
+            List<MongoCredential> credentials = MongoDBUtils.fetchCredentials(puMetadata.getProperties(),
+                    externalProperties);
+            ServerAddress addr;
             try
             {
-                mongo = new MongoClient(host, Integer.parseInt(port));
-                db = mongo.getDB(databaseName);
-
-                try
-                {
-                    MongoDBUtils.authenticate(puMetadata.getProperties(), externalProperties, db);
-                }
-                catch (ClientLoaderException e)
-                {
-                    throw new SchemaGenerationException(e);
-                }
-                catch (KunderaAuthenticationException e)
-                {
-                    throw new SchemaGenerationException(e);
-                }
-
-                return true;
+                addr = new ServerAddress(host, Integer.parseInt(port));
             }
-            catch (UnknownHostException e)
+            catch (NumberFormatException ex)
             {
-                message = e.getMessage();
-                logger.error("Database host cannot be resolved, Caused by", e);
+                throw new SchemaGenerationException(ex);
             }
+
+            mongo = new MongoClient(addr, credentials);
+            db = mongo.getDB(databaseName);
+            return true;
         }
-        throw new SchemaGenerationException("Database host cannot be resolved, Caused by" + message);
+        return false;
     }
 
     /**
@@ -412,6 +402,11 @@ public class MongoDBSchemaManager extends AbstractSchemaManager implements Schem
         {
             options.put(MongoDBConstants.MAX, indexInfo.getMaxValue());
         }
+
+        if (indexInfo.getIndexType() != null && (indexInfo.getIndexType().toLowerCase()).equals("unique"))
+        {
+            options.put("unique", true);
+        }
         collection.createIndex(keys, options);
         KunderaCoreUtils.printQuery("Create indexes on:" + keys, showQuery);
     }
@@ -470,9 +465,17 @@ public class MongoDBSchemaManager extends AbstractSchemaManager implements Schem
             throw new KunderaException("Multiple Lob fields in a single Entity are not supported in Kundera");
     }
 
-    private void createUniqueIndex(DBCollection coll, String id)
+    private void createUniqueIndexGFS(DBCollection coll, String id)
     {
-        coll.createIndex(new BasicDBObject("metadata." + id, 1), new BasicDBObject("unique", true));
+        try
+        {
+            coll.createIndex(new BasicDBObject("metadata." + id, 1), new BasicDBObject("unique", true));
+        }
+        catch (MongoException ex)
+        {
+            throw new KunderaException("Error in creating unique indexes in " + coll.getFullName() + " collection on "
+                    + id + " field");
+        }
     }
 
     @Override

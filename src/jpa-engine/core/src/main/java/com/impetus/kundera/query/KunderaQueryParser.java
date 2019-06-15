@@ -19,16 +19,14 @@ import java.util.ListIterator;
 import java.util.StringTokenizer;
 
 import org.apache.commons.lang.StringUtils;
+import org.eclipse.persistence.jpa.jpql.parser.AggregateFunction;
 import org.eclipse.persistence.jpa.jpql.parser.CollectionExpression;
 import org.eclipse.persistence.jpa.jpql.parser.Expression;
 import org.eclipse.persistence.jpa.jpql.parser.FromClause;
 import org.eclipse.persistence.jpa.jpql.parser.GroupByClause;
 import org.eclipse.persistence.jpa.jpql.parser.HavingClause;
-import org.eclipse.persistence.jpa.jpql.parser.IdentificationVariable;
 import org.eclipse.persistence.jpa.jpql.parser.OrderByClause;
-import org.eclipse.persistence.jpa.jpql.parser.ResultVariable;
 import org.eclipse.persistence.jpa.jpql.parser.SelectClause;
-import org.eclipse.persistence.jpa.jpql.parser.StateFieldPathExpression;
 import org.eclipse.persistence.jpa.jpql.parser.WhereClause;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -375,7 +373,7 @@ public class KunderaQueryParser
             }
 
             // content cannot be empty
-            if (groupByClause == null && groupByClause.toActualText().length() == 0)
+            if (groupByClause == null || groupByClause.toActualText().length() == 0)
             {
                 throw new JPQLParseException("keyword without value: GROUP BY");
             }
@@ -396,7 +394,7 @@ public class KunderaQueryParser
             }
 
             // content cannot be empty
-            if (havingClause == null && havingClause.toActualText().length() == 0)
+            if (havingClause == null || havingClause.toActualText().length() == 0)
             {
                 throw new JPQLParseException("keyword without value: HAVING");
             }
@@ -456,8 +454,7 @@ public class KunderaQueryParser
             }
 
             int aggregationCount = countAggregation(selectClause.getSelectExpression());
-            query.setAggregated(aggregationCount > 0 || query.getSelectStatement().hasGroupByClause()
-                    || query.getSelectStatement().hasOrderByClause());
+            query.setAggregated(aggregationCount > 0 || query.getSelectStatement().hasGroupByClause());
             int count = 0, aggCounter = 0, resultSize = size + 1 - aggregationCount;
             if (resultSize == 0)
             {
@@ -472,7 +469,7 @@ public class KunderaQueryParser
                 {
                     Expression nextExpression = selectColumnIter.next();
                     String property = nextExpression.toActualText();
-                    if (validateExpression(nextExpression))
+                    if (isAggregation(nextExpression))
                     {
                         aggCounter = buildResult(aggResult, aggCounter,
                                 property.substring(property.indexOf('(') + 1, property.indexOf(')')));
@@ -484,7 +481,7 @@ public class KunderaQueryParser
             else
             {
                 String property = selectClause.getSelectExpression().toActualText();
-                if (validateExpression(selectClause.getSelectExpression()))
+                if (isAggregation(selectClause.getSelectExpression()))
                     aggCounter = buildResult(aggResult, aggCounter,
                             property.substring(property.indexOf('(') + 1, property.indexOf(')')));
                 else
@@ -512,20 +509,20 @@ public class KunderaQueryParser
 
             while (selectColumnIter.hasNext())
             {
-                count = validateExpression(selectColumnIter.next()) ? ++count : count;
+                count = isAggregation(selectColumnIter.next()) ? ++count : count;
             }
         }
         else
         {
-            if (validateExpression(selectExpression))
+            if (isAggregation(selectExpression))
                 count = 1;
         }
         return count;
     }
 
-    private boolean validateExpression(Expression expression)
+    private boolean isAggregation(Expression expression)
     {
-        return !(expression instanceof StateFieldPathExpression || expression instanceof IdentificationVariable || expression instanceof ResultVariable);
+        return expression instanceof AggregateFunction;
     }
 
     private int buildResult(String[] result, int count, String property)
@@ -549,7 +546,7 @@ public class KunderaQueryParser
             }
             else
             {
-                if (count > 0)
+                if (count > 0 && !query.isAggregated())
                 {
                     throw new JPQLParseException("Bad query format");
                 }

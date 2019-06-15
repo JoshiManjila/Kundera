@@ -17,6 +17,9 @@ package com.impetus.kundera.client.cassandra.dsdriver;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Map;
 import java.util.Properties;
 
@@ -36,11 +39,14 @@ import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.DowngradingConsistencyRetryPolicy;
 import com.datastax.driver.core.policies.ExponentialReconnectionPolicy;
 import com.datastax.driver.core.policies.FallthroughRetryPolicy;
+import com.datastax.driver.core.policies.HostFilterPolicy;
 import com.datastax.driver.core.policies.LatencyAwarePolicy;
 import com.datastax.driver.core.policies.LoadBalancingPolicy;
 import com.datastax.driver.core.policies.LoggingRetryPolicy;
 import com.datastax.driver.core.policies.RoundRobinPolicy;
 import com.datastax.driver.core.policies.TokenAwarePolicy;
+import com.datastax.driver.core.policies.WhiteListPolicy;
+import com.google.common.base.Predicate;
 import com.impetus.client.cassandra.common.CassandraClientFactory;
 import com.impetus.client.cassandra.common.CassandraConstants;
 import com.impetus.client.cassandra.config.CassandraPropertyReader;
@@ -98,6 +104,10 @@ public class DSClientFactory extends CassandraClientFactory
         {
             initializePropertyReader();
             externalProperties.put(CassandraConstants.CQL_VERSION, CassandraConstants.CQL_VERSION_3_0);
+            externalProperties.put(
+                    CassandraConstants.THRIFT_PORT,
+                    externalProperties.get(CassandraConstants.THRIFT_PORT) != null ? externalProperties
+                            .get(CassandraConstants.THRIFT_PORT) : "9160");
             schemaManager = new CassandraSchemaManager(this.getClass().getName(), externalProperties, kunderaMetadata);
         }
         return schemaManager;
@@ -478,6 +488,8 @@ public class DSClientFactory extends CassandraClientFactory
         LoadBalancingPolicy loadBalancingPolicy = null;
         String isTokenAware = (String) conProperties.get("isTokenAware");
         String isLatencyAware = (String) conProperties.get("isLatencyAware");
+        String whiteList = (String) conProperties.get("whiteList");
+        String hostFilterPolicy = (String) conProperties.get("hostFilterPolicy");
         // Policy.v
         switch (policy)
         {
@@ -486,8 +498,18 @@ public class DSClientFactory extends CassandraClientFactory
 
             String usedHostsPerRemoteDc = (String) conProperties.get("usedHostsPerRemoteDc");
             String localdc = (String) conProperties.get("localdc");
-            loadBalancingPolicy = new DCAwareRoundRobinPolicy(localdc == null ? "DC1" : localdc,
-                    usedHostsPerRemoteDc != null ? Integer.parseInt(usedHostsPerRemoteDc) : 0);
+            String allowRemoteDCsForLocalConsistencyLevel = (String) conProperties
+                    .get("allowRemoteDCsForLocalConsistencyLevel");
+            DCAwareRoundRobinPolicy.Builder policyBuilder = DCAwareRoundRobinPolicy.builder();
+            policyBuilder.withLocalDc(localdc == null ? "DC1" : localdc);
+            policyBuilder.withUsedHostsPerRemoteDc(usedHostsPerRemoteDc != null ? Integer
+                    .parseInt(usedHostsPerRemoteDc) : 0);
+            if (allowRemoteDCsForLocalConsistencyLevel != null
+                    && "true".equalsIgnoreCase(allowRemoteDCsForLocalConsistencyLevel))
+            {
+                policyBuilder.allowRemoteDCsForLocalConsistencyLevel();
+            }
+            loadBalancingPolicy = policyBuilder.build();
             break;
 
         // case RoundRobinPolicy:
@@ -509,7 +531,130 @@ public class DSClientFactory extends CassandraClientFactory
             loadBalancingPolicy = LatencyAwarePolicy.builder(loadBalancingPolicy).build();
         }
 
+        if (loadBalancingPolicy != null && whiteList != null)
+        {
+            Collection<InetSocketAddress> whiteListCollection = buildWhiteListCollection(whiteList);
+
+            loadBalancingPolicy = new WhiteListPolicy(loadBalancingPolicy, whiteListCollection);
+        }
+
+        if (loadBalancingPolicy != null && hostFilterPolicy != null)
+        {
+            Predicate<com.datastax.driver.core.Host> predicate = getHostFilterPredicate(hostFilterPolicy);
+
+            loadBalancingPolicy = new HostFilterPolicy(loadBalancingPolicy, predicate);
+        }
+
         return loadBalancingPolicy;
+    }
+
+    /**
+     * Gets the host filter predicate.
+     * 
+     * @param hostFilterPolicy
+     *            the host filter policy
+     * @return the host filter predicate
+     */
+    private Predicate<com.datastax.driver.core.Host> getHostFilterPredicate(String hostFilterPolicy)
+    {
+        Predicate<com.datastax.driver.core.Host> predicate = null;
+        Method getter = null;
+        Class<?> hostFilterClazz = null;
+        try
+        {
+
+            hostFilterClazz = Class.forName(hostFilterPolicy);
+            getter = hostFilterClazz.getDeclaredMethod(GET_INSTANCE);
+
+            predicate = (Predicate<com.datastax.driver.core.Host>) getter.invoke(KunderaCoreUtils
+                    .createNewInstance(hostFilterClazz));
+        }
+        catch (ClassNotFoundException e)
+        {
+            logger.error(e.getMessage());
+            throw new KunderaException("Please make sure class " + hostFilterPolicy
+                    + " set in property file exists in classpath " + e.getMessage());
+        }
+        catch (IllegalAccessException e)
+        {
+            logger.error(e.getMessage());
+            throw new KunderaException("Method " + getter.getName() + " must be declared public " + e.getMessage());
+        }
+        catch (NoSuchMethodException e)
+        {
+            logger.error(e.getMessage());
+            throw new KunderaException("Please make sure getter method of " + hostFilterClazz.getSimpleName()
+                    + " is named \"getInstance()\"");
+        }
+        catch (InvocationTargetException e)
+        {
+            logger.error(e.getMessage());
+            throw new KunderaException("Error while executing \"getInstance()\" method of Class "
+                    + hostFilterClazz.getSimpleName() + ": " + e.getMessage());
+        }
+        catch (SecurityException e)
+        {
+            logger.error(e.getMessage());
+            throw new KunderaException("Encountered security exception while accessing the method: "
+                    + "\"getInstance()\"" + e.getMessage());
+        }
+        return predicate;
+    }
+
+    /**
+     * Builds the white list collection.
+     * 
+     * @param whiteList
+     *            the white list
+     * @return the collection
+     */
+    private Collection<InetSocketAddress> buildWhiteListCollection(String whiteList)
+    {
+        String[] list = whiteList.split(Constants.COMMA);
+        Collection<InetSocketAddress> whiteListCollection = new ArrayList<InetSocketAddress>();
+
+        PersistenceUnitMetadata persistenceUnitMetadata = kunderaMetadata.getApplicationMetadata()
+                .getPersistenceUnitMetadata(getPersistenceUnit());
+        Properties props = persistenceUnitMetadata.getProperties();
+        int defaultPort = 9042;
+
+        if (externalProperties != null && externalProperties.get(PersistenceProperties.KUNDERA_PORT) != null)
+        {
+            try
+            {
+                defaultPort = Integer.parseInt((String) externalProperties.get(PersistenceProperties.KUNDERA_PORT));
+            }
+            catch (NumberFormatException e)
+            {
+                logger.error("Port in persistence.xml should be integer");
+            }
+        }
+
+        else
+        {
+            try
+            {
+                defaultPort = Integer.parseInt((String) props.get(PersistenceProperties.KUNDERA_PORT));
+            }
+            catch (NumberFormatException e)
+            {
+                logger.error("Port in persistence.xml should be integer");
+            }
+        }
+
+        for (String node : list)
+        {
+            if (node.indexOf(Constants.COLON) > 0)
+            {
+                String[] parts = node.split(Constants.COLON);
+                whiteListCollection.add(new InetSocketAddress(parts[0], Integer.parseInt(parts[1])));
+            }
+            else
+            {
+                whiteListCollection.add(new InetSocketAddress(node, defaultPort));
+            }
+        }
+        return whiteListCollection;
     }
 
     /**
@@ -628,7 +773,8 @@ public class DSClientFactory extends CassandraClientFactory
         catch (ClassNotFoundException e)
         {
             logger.error(e.getMessage());
-            throw new KunderaException("Please make sure class "+customRetryPolicy+" set in property file exists in classpath " + e.getMessage());
+            throw new KunderaException("Please make sure class " + customRetryPolicy
+                    + " set in property file exists in classpath " + e.getMessage());
         }
         catch (IllegalAccessException e)
         {
@@ -728,10 +874,9 @@ public class DSClientFactory extends CassandraClientFactory
         PoolingOptions options = new PoolingOptions();
 
         String hostDistance = connectionProperties.getProperty("hostDistance");
-        String minSimultaneousRequests = connectionProperties.getProperty("minSimultaneousRequests");
-        String maxSimultaneousRequests = connectionProperties.getProperty("maxSimultaneousRequests");
+        String maxConnectionsPerHost = connectionProperties.getProperty("maxConnectionsPerHost");
+        String maxRequestsPerConnection = connectionProperties.getProperty("maxRequestsPerConnection");
         String coreConnections = connectionProperties.getProperty("coreConnections");
-        String maxConnections = connectionProperties.getProperty("maxConnections");
 
         if (!StringUtils.isBlank(hostDistance))
         {
@@ -741,19 +886,14 @@ public class DSClientFactory extends CassandraClientFactory
                 options.setCoreConnectionsPerHost(HostDistance.LOCAL, new Integer(coreConnections));
             }
 
-            if (!StringUtils.isBlank(maxConnections))
+            if (!StringUtils.isBlank(maxConnectionsPerHost))
             {
-                options.setMaxConnectionsPerHost(hostDist, new Integer(maxConnections));
+                options.setMaxConnectionsPerHost(hostDist, new Integer(maxConnectionsPerHost));
             }
 
-            if (!StringUtils.isBlank(minSimultaneousRequests))
+            if (!StringUtils.isBlank(maxRequestsPerConnection))
             {
-                options.setMinSimultaneousRequestsPerConnectionThreshold(hostDist, new Integer(minSimultaneousRequests));
-            }
-
-            if (!StringUtils.isBlank(maxSimultaneousRequests))
-            {
-                options.setMaxSimultaneousRequestsPerConnectionThreshold(hostDist, new Integer(maxSimultaneousRequests));
+                options.setMaxRequestsPerConnection(hostDist, new Integer(maxRequestsPerConnection));
             }
         }
         return options;

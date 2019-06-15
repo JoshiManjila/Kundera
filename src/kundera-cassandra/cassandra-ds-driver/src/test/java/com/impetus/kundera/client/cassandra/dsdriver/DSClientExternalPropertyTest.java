@@ -38,10 +38,12 @@ import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.DowngradingConsistencyRetryPolicy;
 import com.datastax.driver.core.policies.ExponentialReconnectionPolicy;
 import com.datastax.driver.core.policies.FallthroughRetryPolicy;
+import com.datastax.driver.core.policies.HostFilterPolicy;
 import com.datastax.driver.core.policies.LatencyAwarePolicy;
 import com.datastax.driver.core.policies.LoggingRetryPolicy;
 import com.datastax.driver.core.policies.RoundRobinPolicy;
 import com.datastax.driver.core.policies.TokenAwarePolicy;
+import com.datastax.driver.core.policies.WhiteListPolicy;
 import com.impetus.client.cassandra.common.CassandraConstants;
 import com.impetus.client.cassandra.config.CassandraPropertyReader;
 import com.impetus.kundera.client.cassandra.persistence.CassandraCli;
@@ -124,9 +126,7 @@ public class DSClientExternalPropertyTest
         Assert.assertEquals(configuration.getPoolingOptions().getCoreConnectionsPerHost(distance), 5);
         Assert.assertEquals(configuration.getPoolingOptions().getMaxConnectionsPerHost(distance), 12);
         Assert.assertEquals(configuration.getPoolingOptions()
-                .getMaxSimultaneousRequestsPerConnectionThreshold(distance), 128);
-        Assert.assertEquals(configuration.getPoolingOptions()
-                .getMinSimultaneousRequestsPerConnectionThreshold(distance), 65);
+                .getMaxRequestsPerConnection(distance), 128);
 
         Assert.assertEquals(configuration.getPolicies().getLoadBalancingPolicy().getClass().getName(), RRP);
         Assert.assertEquals(configuration.getPolicies().getReconnectionPolicy().getClass().getName(), ERP);
@@ -212,15 +212,13 @@ public class DSClientExternalPropertyTest
         Assert.assertEquals(configuration.getPoolingOptions().getCoreConnectionsPerHost(distance), 5);
         Assert.assertEquals(configuration.getPoolingOptions().getMaxConnectionsPerHost(distance), 12);
         Assert.assertEquals(configuration.getPoolingOptions()
-                .getMaxSimultaneousRequestsPerConnectionThreshold(distance), 128);
-        Assert.assertEquals(configuration.getPoolingOptions()
-                .getMinSimultaneousRequestsPerConnectionThreshold(distance), 65);
+                .getMaxRequestsPerConnection(distance), 128);
         Assert.assertEquals(configuration.getPolicies().getLoadBalancingPolicy().getClass().getName(), TAP);
         Assert.assertEquals(configuration.getPolicies().getReconnectionPolicy().getClass().getName(), CRP);
         Assert.assertEquals(configuration.getPolicies().getRetryPolicy().getClass().getName(), LRTP);
 
         Assert.assertEquals(connectionProperties.getProperty("constantDelayMs"), "110000");
-        Assert.assertEquals(connectionProperties.getProperty("localdc"), "dc1");
+        Assert.assertEquals(connectionProperties.getProperty("localdc"), "datacenter1");
         Assert.assertEquals(connectionProperties.getProperty("usedHostsPerRemoteDc"), "2");
         Assert.assertEquals(connectionProperties.getProperty("isTokenAware"), "true");
         Assert.assertEquals(connectionProperties.getProperty("isLoggingRetry"), "true");
@@ -270,16 +268,14 @@ public class DSClientExternalPropertyTest
         Assert.assertEquals(configuration.getPoolingOptions().getCoreConnectionsPerHost(distance), 5);
         Assert.assertEquals(configuration.getPoolingOptions().getMaxConnectionsPerHost(distance), 12);
         Assert.assertEquals(configuration.getPoolingOptions()
-                .getMaxSimultaneousRequestsPerConnectionThreshold(distance), 128);
-        Assert.assertEquals(configuration.getPoolingOptions()
-                .getMinSimultaneousRequestsPerConnectionThreshold(distance), 65);
+                .getMaxRequestsPerConnection(distance), 128);
         Assert.assertEquals(configuration.getPolicies().getLoadBalancingPolicy().getClass().getName(),
                 LatencyAwarePolicy.class.getName());
         Assert.assertEquals(configuration.getPolicies().getReconnectionPolicy().getClass().getName(), CRP);
         Assert.assertEquals(configuration.getPolicies().getRetryPolicy().getClass().getName(), LRTP);
 
         Assert.assertEquals(connectionProperties.getProperty("constantDelayMs"), "110000");
-        Assert.assertEquals(connectionProperties.getProperty("localdc"), "dc1");
+        Assert.assertEquals(connectionProperties.getProperty("localdc"), "datacenter1");
         Assert.assertEquals(connectionProperties.getProperty("usedHostsPerRemoteDc"), "2");
         Assert.assertEquals(connectionProperties.getProperty("isLatencyAware"), "true");
         Assert.assertEquals(connectionProperties.getProperty("isLoggingRetry"), "true");
@@ -304,7 +300,7 @@ public class DSClientExternalPropertyTest
         emf = Persistence.createEntityManagerFactory(_PU, propertyMap);
 
         DSClientFactory ds = new DSClientFactory();
-        final String RRP = RoundRobinPolicy.class.getName();
+        final String RRP = WhiteListPolicy.class.getName();
         final String ERP = ExponentialReconnectionPolicy.class.getName();
         final String DCRP = FallthroughRetryPolicy.class.getName();
         Properties connectionProperties = initialize(ds);
@@ -328,9 +324,7 @@ public class DSClientExternalPropertyTest
         Assert.assertEquals(configuration.getPoolingOptions().getCoreConnectionsPerHost(distance), 5);
         Assert.assertEquals(configuration.getPoolingOptions().getMaxConnectionsPerHost(distance), 12);
         Assert.assertEquals(configuration.getPoolingOptions()
-                .getMaxSimultaneousRequestsPerConnectionThreshold(distance), 128);
-        Assert.assertEquals(configuration.getPoolingOptions()
-                .getMinSimultaneousRequestsPerConnectionThreshold(distance), 65);
+                .getMaxRequestsPerConnection(distance), 128);
 
         Assert.assertEquals(configuration.getPolicies().getLoadBalancingPolicy().getClass().getName(), RRP);
         Assert.assertEquals(configuration.getPolicies().getReconnectionPolicy().getClass().getName(), ERP);
@@ -360,7 +354,7 @@ public class DSClientExternalPropertyTest
         emf = Persistence.createEntityManagerFactory(_PU, propertyMap);
 
         DSClientFactory ds = new DSClientFactory();
-        final String DRRP = DCAwareRoundRobinPolicy.class.getName();
+        final String DRRP = HostFilterPolicy.class.getName();
         final String CRP = ConstantReconnectionPolicy.class.getName();
         final String DCRP = DowngradingConsistencyRetryPolicy.class.getName();
         Properties connectionProperties = initialize(ds);
@@ -384,9 +378,7 @@ public class DSClientExternalPropertyTest
         Assert.assertEquals(configuration.getPoolingOptions().getCoreConnectionsPerHost(distance), 5);
         Assert.assertEquals(configuration.getPoolingOptions().getMaxConnectionsPerHost(distance), 12);
         Assert.assertEquals(configuration.getPoolingOptions()
-                .getMaxSimultaneousRequestsPerConnectionThreshold(distance), 128);
-        Assert.assertEquals(configuration.getPoolingOptions()
-                .getMinSimultaneousRequestsPerConnectionThreshold(distance), 65);
+                .getMaxRequestsPerConnection(distance), 128);
 
         Assert.assertEquals(configuration.getPolicies().getLoadBalancingPolicy().getClass().getName(), DRRP);
         Assert.assertEquals(configuration.getPolicies().getReconnectionPolicy().getClass().getName(), CRP);

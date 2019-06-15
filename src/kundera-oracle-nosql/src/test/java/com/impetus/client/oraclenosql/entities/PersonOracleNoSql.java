@@ -30,7 +30,7 @@ import com.impetus.kundera.index.IndexCollection;
  * @author vivek.mishra
  */
 @Entity
-@Table(name = "PERSON_KV_STORE")
+@Table(name = "PERSON_ORACLE_NOSQL")
 @IndexCollection(columns = { @Index(name = "personName"), @Index(name = "age") })
 public class PersonOracleNoSql
 {
@@ -48,7 +48,7 @@ public class PersonOracleNoSql
     @Column(name = "AGE")
     private Integer age;
 
-    @Column(name = "ENUM")
+    @Column(name = "DAY_ENUM")
     @Enumerated(EnumType.STRING)
     private Day day;
 

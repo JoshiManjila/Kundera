@@ -20,19 +20,20 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 
-import javax.persistence.GenerationType;
 import javax.persistence.PersistenceException;
 import javax.persistence.metamodel.Attribute;
 import javax.persistence.metamodel.EntityType;
 
+import org.eclipse.persistence.jpa.jpql.parser.Expression;
+import org.eclipse.persistence.jpa.jpql.parser.OrderByItem;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.bulk.BulkRequestBuilder;
 import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.delete.DeleteRequest;
-import org.elasticsearch.action.deletebyquery.DeleteByQueryRequestBuilder;
 import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexResponse;
@@ -40,15 +41,15 @@ import org.elasticsearch.action.search.SearchRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.client.transport.TransportClient;
-import org.elasticsearch.index.query.FilterBuilder;
-import org.elasticsearch.index.query.FilterBuilders;
 import org.elasticsearch.index.query.FilteredQueryBuilder;
+import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
-import org.elasticsearch.index.query.TermFilterBuilder;
+import org.elasticsearch.index.query.TermQueryBuilder;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.SearchHitField;
 import org.elasticsearch.search.SearchHits;
 import org.elasticsearch.search.aggregations.AggregationBuilder;
+import org.elasticsearch.search.sort.SortOrder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -74,6 +75,7 @@ import com.impetus.kundera.persistence.api.Batcher;
 import com.impetus.kundera.persistence.context.jointable.JoinTableData;
 import com.impetus.kundera.property.PropertyAccessorHelper;
 import com.impetus.kundera.query.KunderaQuery;
+import com.impetus.kundera.query.KunderaQueryUtils;
 import com.impetus.kundera.utils.KunderaCoreUtils;
 
 /**
@@ -104,6 +106,9 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
     /** The client properties. */
     private Map clientProperties;
 
+    /** The set reresh indexes. */
+    private boolean setRereshIndexes;
+
     /** The Constant KEY_SEPERATOR. */
     private static final String KEY_SEPERATOR = "\001";
 
@@ -133,14 +138,16 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
         this.txClient = client;
         this.reader = new ESEntityReader(kunderaMetadata);
         setBatchSize(getPersistenceUnit(), externalProperties);
+        setRefreshIndexes(
+                kunderaMetadata.getApplicationMetadata().getPersistenceUnitMetadata(persistenceUnit).getProperties(),
+                externalProperties);
     }
 
     /*
      * (non-Javadoc)
      * 
-     * @see
-     * com.impetus.kundera.client.ClientBase#onPersist(com.impetus.kundera.metadata
-     * .model.EntityMetadata, java.lang.Object, java.lang.Object,
+     * @see com.impetus.kundera.client.ClientBase#onPersist(com.impetus.kundera.
+     * metadata .model.EntityMetadata, java.lang.Object, java.lang.Object,
      * java.util.List)
      */
     @Override
@@ -150,8 +157,8 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
         {
             Map<String, Object> values = new HashMap<String, Object>();
 
-            MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata().getMetamodel(
-                    entityMetadata.getPersistenceUnit());
+            MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata()
+                    .getMetamodel(entityMetadata.getPersistenceUnit());
 
             EntityType entityType = metaModel.entity(entityMetadata.getEntityClazz());
 
@@ -164,7 +171,7 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
 
             IndexResponse response = txClient
                     .prepareIndex(entityMetadata.getSchema().toLowerCase(), entityMetadata.getTableName(), keyAsString)
-                    .setSource(values).execute().actionGet();
+                    .setSource(values).setRefresh(isRefreshIndexes()).execute().actionGet();
 
             assert response.getId() != null;
         }
@@ -250,8 +257,8 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
         EntityMetadata metadata = KunderaMetadataManager.getEntityMetadata(kunderaMetadata, entityClass);
         GetResponse get = null;
 
-        MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata().getMetamodel(
-                metadata.getPersistenceUnit());
+        MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata()
+                .getMetamodel(metadata.getPersistenceUnit());
 
         EntityType entityType = metaModel.entity(metadata.getEntityClazz());
 
@@ -288,39 +295,42 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
 
     /**
      * Execute query.
-     * 
+     *
      * @param filter
      *            the filter
      * @param aggregation
      *            the aggregation
-     * @param queryBuilder
-     *            the query builder
      * @param entityMetadata
      *            the entity metadata
      * @param query
      *            the query
-     * @param maxResult
+     * @param firstResult
+     *            the first result
+     * @param maxResults
+     *            the max results
      * @return the list
      */
-    public List executeQuery(FilterBuilder filter, AggregationBuilder aggregation, final EntityMetadata entityMetadata,
-            KunderaQuery query, int maxResults)
+    public List executeQuery(QueryBuilder filter, AggregationBuilder aggregation, final EntityMetadata entityMetadata,
+            KunderaQuery query, int firstResult, int maxResults)
     {
         String[] fieldsToSelect = query.getResult();
         Class clazz = entityMetadata.getEntityClazz();
 
-        MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata().getMetamodel(
-                entityMetadata.getPersistenceUnit());
+        MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata()
+                .getMetamodel(entityMetadata.getPersistenceUnit());
 
         FilteredQueryBuilder queryBuilder = QueryBuilders.filteredQuery(null, filter);
-        SearchRequestBuilder builder = txClient.prepareSearch(entityMetadata.getSchema().toLowerCase()).setTypes(
-                entityMetadata.getTableName());
+        SearchRequestBuilder builder = txClient.prepareSearch(entityMetadata.getSchema().toLowerCase())
+                .setTypes(entityMetadata.getTableName());
 
         addFieldsToBuilder(fieldsToSelect, clazz, metaModel, builder);
 
         if (aggregation == null)
         {
             builder.setQuery(queryBuilder);
+            builder.setFrom(firstResult);
             builder.setSize(maxResults);
+            addSortOrder(builder, query, entityMetadata);
         }
         else
         {
@@ -353,6 +363,37 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
     }
 
     /**
+     * Adds the sort order.
+     * 
+     * @param builder
+     *            the builder
+     * @param query
+     *            the query
+     * @param entityMetadata
+     *            the entity metadata
+     */
+    private void addSortOrder(SearchRequestBuilder builder, KunderaQuery query, EntityMetadata entityMetadata)
+    {
+        MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata()
+                .getMetamodel(entityMetadata.getPersistenceUnit());
+
+        List<OrderByItem> orderList = KunderaQueryUtils.getOrderByItems(query.getJpqlExpression());
+
+        for (OrderByItem orderByItem : orderList)
+        {
+            String ordering = orderByItem.getOrdering().toString();
+
+            if (ordering.equalsIgnoreCase(ESConstants.DEFAULT))
+            {
+                ordering = Expression.ASC;
+            }
+
+            builder.addSort(KunderaCoreUtils.getJPAColumnName(orderByItem.getExpression().toParsedText(),
+                    entityMetadata, metaModel), SortOrder.valueOf(ordering));
+        }
+    }
+
+    /**
      * Adds the fields to builder
      * 
      * @param fieldsToSelect
@@ -373,9 +414,8 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
             for (int i = 1; i < fieldsToSelect.length; i++)
             {
                 logger.debug(i + " : " + fieldsToSelect[i]);
-                builder = builder
-                        .addField(((AbstractAttribute) metaModel.entity(clazz).getAttribute(fieldsToSelect[i]))
-                                .getJPAColumnName());
+                builder = builder.addField(((AbstractAttribute) metaModel.entity(clazz).getAttribute(fieldsToSelect[i]))
+                        .getJPAColumnName());
             }
         }
     }
@@ -429,8 +469,8 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
         {
             EntityMetadata metadata = KunderaMetadataManager.getEntityMetadata(kunderaMetadata, entity.getClass());
 
-            MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata().getMetamodel(
-                    metadata.getPersistenceUnit());
+            MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata()
+                    .getMetamodel(metadata.getPersistenceUnit());
 
             EntityType entityType = metaModel.entity(metadata.getEntityClazz());
 
@@ -439,7 +479,7 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
             try
             {
                 txClient.prepareDelete(metadata.getSchema().toLowerCase(), metadata.getTableName(),
-                        keyAsString.toString()/* index, type, id */).setOperationThreaded(false).execute().get();
+                        keyAsString.toString()/* index, type, id */).setRefresh(isRefreshIndexes()).execute().get();
             }
             catch (InterruptedException iex)
             {
@@ -477,7 +517,7 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
 
         Set<Object> joinKeys = joinTableRecords.keySet();
 
-        BulkRequestBuilder bulkRequest = txClient.prepareBulk();
+        BulkRequestBuilder bulkRequest = txClient.prepareBulk().setRefresh(isRefreshIndexes());
 
         /**
          * 1_p => 1_a1,1_a2 1_a1=> 1_p,1_p1
@@ -537,7 +577,7 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
             Object pKeyColumnValue, Class columnJavaType)
     {
         // fetch list ADDRESS_ID for given PERSON_ID
-        FilterBuilder filterBuilder = new TermFilterBuilder(pKeyColumnName, pKeyColumnValue);
+        QueryBuilder filterBuilder = new TermQueryBuilder(pKeyColumnName, pKeyColumnValue);
 
         SearchResponse response = txClient.prepareSearch(schemaName.toLowerCase()).setTypes(tableName)
                 .setPostFilter(filterBuilder).addField(columnName).execute().actionGet();
@@ -566,7 +606,7 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
             Object columnValue, Class entityClazz)
     {
 
-        TermFilterBuilder filter = FilterBuilders.termFilter(columnName, columnValue);
+        TermQueryBuilder filter = QueryBuilders.termQuery(columnName, columnValue);
 
         SearchResponse response = txClient.prepareSearch(schemaName.toLowerCase()).setTypes(tableName)
                 .addField(pKeyName).setPostFilter(filter).execute().actionGet();
@@ -596,13 +636,15 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
     @Override
     public void deleteByColumn(String schemaName, String tableName, String columnName, Object columnValue)
     {
-        Map<String, Object> querySource = new HashMap<String, Object>();
-        querySource.put(columnName, columnValue);
-
-        DeleteByQueryRequestBuilder deleteQueryBuilder = txClient.prepareDeleteByQuery(schemaName.toLowerCase())
-                .setSource(querySource).setTypes(tableName);
-
-        deleteQueryBuilder.execute().actionGet();
+        // TODO: implement using scroll/scan and bulk delete requests
+        // Map<String, Object> querySource = new HashMap<String, Object>();
+        // querySource.put(columnName, columnValue);
+        //
+        // DeleteByQueryRequestBuilder deleteQueryBuilder =
+        // txClient.prepareDeleteByQuery(schemaName.toLowerCase())
+        // .setSource(querySource).setTypes(tableName);
+        //
+        // deleteQueryBuilder.execute().actionGet();
     }
 
     /*
@@ -622,20 +664,19 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
 
         try
         {
-            SearchResponse response = txClient.prepareSearch(metadata.getSchema().toLowerCase())/*
-                                                                                                 * .
-                                                                                                 * addFields
-                                                                                                 * (
-                                                                                                 * "*"
-                                                                                                 * )
-                                                                                                 */
-            .setTypes(metadata.getTableName()).setQuery(QueryBuilders.termQuery(colName, colValue)).execute().get();
+            SearchResponse response = txClient
+                    .prepareSearch(metadata.getSchema()
+                            .toLowerCase())/*
+                                            * . addFields ( "*" )
+                                            */
+                    .setTypes(metadata.getTableName()).setQuery(QueryBuilders.termQuery(colName, colValue)).execute()
+                    .get();
 
             SearchHits hits = response.getHits();
             for (SearchHit hit : hits)
             {
-                MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata().getMetamodel(
-                        metadata.getPersistenceUnit());
+                MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata()
+                        .getMetamodel(metadata.getPersistenceUnit());
 
                 EntityType entityType = metaModel.entity(entityClazz);
                 Map<String, Object> searchResults = hit.getSource();
@@ -725,7 +766,7 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
     @Override
     public int executeBatch()
     {
-        BulkRequestBuilder bulkRequest = txClient.prepareBulk();
+        BulkRequestBuilder bulkRequest = txClient.prepareBulk().setRefresh(isRefreshIndexes());
 
         try
         {
@@ -739,8 +780,8 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
                     EntityMetadata metadata = KunderaMetadataManager.getEntityMetadata(kunderaMetadata,
                             node.getDataClass());
 
-                    MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata().getMetamodel(
-                            metadata.getPersistenceUnit());
+                    MetamodelImpl metaModel = (MetamodelImpl) kunderaMetadata.getApplicationMetadata()
+                            .getMetamodel(metadata.getPersistenceUnit());
 
                     EntityType entityType = metaModel.entity(metadata.getEntityClazz());
 
@@ -884,9 +925,9 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
     /*
      * (non-Javadoc)
      * 
-     * @see
-     * com.impetus.kundera.client.ClientPropertiesSetter#populateClientProperties
-     * (com.impetus.kundera.client.Client, java.util.Map)
+     * @see com.impetus.kundera.client.ClientPropertiesSetter#
+     * populateClientProperties (com.impetus.kundera.client.Client,
+     * java.util.Map)
      */
     @Override
     public void populateClientProperties(Client client, Map<String, Object> properties)
@@ -902,7 +943,82 @@ public class ESClient extends ClientBase implements Client<ESQuery>, Batcher, Cl
     @Override
     public Generator getIdGenerator()
     {
-        throw new UnsupportedOperationException(GenerationType.class.getSimpleName()
-                + " Strategies not supported by this client : ESClient");
+        return (Generator) KunderaCoreUtils.createNewInstance(EsIdGenerator.class);
+    }
+
+    /**
+     * Sets the refresh indexes.
+     *
+     * @param puProps
+     *            the pu props
+     * @param externalProperties
+     *            the external properties
+     */
+    private void setRefreshIndexes(Properties puProps, Map<String, Object> externalProperties)
+    {
+        Object refreshIndexes = null;
+
+        /*
+         * Check from properties set while creating emf
+         * 
+         */
+        if (externalProperties.get(ESConstants.KUNDERA_ES_REFRESH_INDEXES) != null)
+        {
+
+            refreshIndexes = externalProperties.get(ESConstants.KUNDERA_ES_REFRESH_INDEXES);
+
+        }
+
+        /*
+         * Check from PU Properties
+         * 
+         */
+        if (refreshIndexes == null && puProps.get(ESConstants.KUNDERA_ES_REFRESH_INDEXES) != null)
+        {
+
+            refreshIndexes = puProps.get(ESConstants.KUNDERA_ES_REFRESH_INDEXES);
+
+        }
+
+        if (refreshIndexes != null)
+        {
+            if (refreshIndexes instanceof Boolean)
+            {
+                this.setRereshIndexes = (boolean) refreshIndexes;
+            }
+            else
+            {
+                this.setRereshIndexes = Boolean.parseBoolean((String) refreshIndexes);
+            }
+        }
+    }
+
+    /**
+     * Checks if is refresh indexes.
+     *
+     * @return true, if is refresh indexes
+     */
+    private boolean isRefreshIndexes()
+    {
+
+        if (clientProperties != null)
+        {
+
+            Object refreshIndexes = clientProperties.get(ESConstants.ES_REFRESH_INDEXES);
+
+            if (refreshIndexes != null && refreshIndexes instanceof Boolean)
+            {
+                return (boolean) refreshIndexes;
+            }
+            else
+            {
+                return Boolean.parseBoolean((String) refreshIndexes);
+            }
+
+        }
+        else
+        {
+            return this.setRereshIndexes;
+        }
     }
 }

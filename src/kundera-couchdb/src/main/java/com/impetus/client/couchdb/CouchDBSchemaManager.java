@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.HashMap;
@@ -74,17 +75,38 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
     /** The logger. */
     private static Logger logger = LoggerFactory.getLogger(CouchDBSchemaManager.class);
 
+    /** The http client. */
     private HttpClient httpClient;
 
+    /** The http host. */
     private HttpHost httpHost;
 
+    /** The gson. */
     private Gson gson = new Gson();
 
-    public CouchDBSchemaManager(String clientFactory, Map<String, Object> externalProperties, final KunderaMetadata kunderaMetadata)
+    /**
+     * Instantiates a new couch db schema manager.
+     * 
+     * @param clientFactory
+     *            the client factory
+     * @param externalProperties
+     *            the external properties
+     * @param kunderaMetadata
+     *            the kundera metadata
+     */
+    public CouchDBSchemaManager(String clientFactory, Map<String, Object> externalProperties,
+            final KunderaMetadata kunderaMetadata)
     {
         super(clientFactory, externalProperties, kunderaMetadata);
     }
 
+    /*
+     * (non-Javadoc)
+     * 
+     * @see
+     * com.impetus.kundera.configure.schema.api.AbstractSchemaManager#exportSchema
+     * (java.lang.String, java.util.List)
+     */
     @Override
     /**
      * Export schema handles the handleOperation method.
@@ -115,8 +137,8 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
                     StringBuilder builder = new StringBuilder("rev=");
                     builder.append(designDocument.get_rev());
                     URI uri = new URI(CouchDBConstants.PROTOCOL, null, httpHost.getHostName(), httpHost.getPort(),
-                            CouchDBConstants.URL_SAPRATOR + databaseName.toLowerCase() + CouchDBConstants.URL_SAPRATOR
-                                    + id, builder.toString(), null);
+                            CouchDBConstants.URL_SEPARATOR + databaseName.toLowerCase()
+                                    + CouchDBConstants.URL_SEPARATOR + id, builder.toString(), null);
                     HttpDelete delete = new HttpDelete(uri);
                     try
                     {
@@ -138,6 +160,10 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
 
     /**
      * To validate entity.
+     * 
+     * @param clazz
+     *            the clazz
+     * @return true, if successful
      */
     @Override
     public boolean validateEntity(Class clazz)
@@ -147,6 +173,8 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
 
     /**
      * Instantiate http client.
+     * 
+     * @return true, if successful
      */
     @Override
     protected boolean initiateClient()
@@ -203,6 +231,9 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
 
     /**
      * Validate design document.
+     * 
+     * @param tableInfos
+     *            the table infos
      */
     @Override
     protected void validate(List<TableInfo> tableInfos)
@@ -261,6 +292,9 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
 
     /**
      * Update design document.
+     * 
+     * @param tableInfos
+     *            the table infos
      */
     @Override
     protected void update(List<TableInfo> tableInfos)
@@ -292,22 +326,25 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
                 // for select all.
                 createViewForSelectAllIfNotExist(tableInfo, views);
 
+                // for selecting specific field
+                createViewForSelectSpecificFields(views);
+
                 designDocument.setViews(views);
 
                 URI uri = null;
                 if (designDocument.get_rev() == null)
                 {
                     uri = new URI(CouchDBConstants.PROTOCOL, null, httpHost.getHostName(), httpHost.getPort(),
-                            CouchDBConstants.URL_SAPRATOR + databaseName.toLowerCase() + CouchDBConstants.URL_SAPRATOR
-                                    + id, null, null);
+                            CouchDBConstants.URL_SEPARATOR + databaseName.toLowerCase()
+                                    + CouchDBConstants.URL_SEPARATOR + id, null, null);
                 }
                 else
                 {
                     StringBuilder builder = new StringBuilder("rev=");
                     builder.append(designDocument.get_rev());
                     uri = new URI(CouchDBConstants.PROTOCOL, null, httpHost.getHostName(), httpHost.getPort(),
-                            CouchDBConstants.URL_SAPRATOR + databaseName.toLowerCase() + CouchDBConstants.URL_SAPRATOR
-                                    + id, builder.toString(), null);
+                            CouchDBConstants.URL_SEPARATOR + databaseName.toLowerCase()
+                                    + CouchDBConstants.URL_SEPARATOR + id, builder.toString(), null);
                 }
                 HttpPut put = new HttpPut(uri);
 
@@ -323,6 +360,11 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
                     CouchDBUtils.closeContent(response);
                 }
             }
+            // creating views for various aggregations in the following
+            // order:
+            // -- COUNT SUM MAX MIN AVG
+            // IMPORTANT: The aggregations does not support WHERE clause
+            createDesignDocForAggregations();
         }
         catch (Exception e)
         {
@@ -333,6 +375,9 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
 
     /**
      * Create database and design document.
+     * 
+     * @param tableInfos
+     *            the table infos
      */
     @Override
     protected void create(List<TableInfo> tableInfos)
@@ -358,14 +403,13 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
                 // for select all.
                 createViewForSelectAll(tableInfo, views);
 
+                // for selecting specific field
+                createViewForSelectSpecificFields(views);
+
                 designDocument.setViews(views);
-                URI uri = new URI(
-                        CouchDBConstants.PROTOCOL,
-                        null,
-                        httpHost.getHostName(),
-                        httpHost.getPort(),
-                        CouchDBConstants.URL_SAPRATOR + databaseName.toLowerCase() + CouchDBConstants.URL_SAPRATOR + id,
-                        null, null);
+                URI uri = new URI(CouchDBConstants.PROTOCOL, null, httpHost.getHostName(), httpHost.getPort(),
+                        CouchDBConstants.URL_SEPARATOR + databaseName.toLowerCase() + CouchDBConstants.URL_SEPARATOR
+                                + id, null, null);
                 HttpPut put = new HttpPut(uri);
 
                 String jsonObject = gson.toJson(designDocument);
@@ -380,6 +424,12 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
                     CouchDBUtils.closeContent(response);
                 }
             }
+            // creating views for various aggregations in the following
+            // order:
+            // -- COUNT SUM MAX MIN AVG
+            // IMPORTANT: The aggregations does not support WHERE clause
+            createDesignDocForAggregations();
+
         }
         catch (Exception e)
         {
@@ -389,7 +439,160 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
     }
 
     /**
+     * Creates the design doc for aggregations.
+     * 
+     * @throws URISyntaxException
+     *             the URI syntax exception
+     * @throws UnsupportedEncodingException
+     *             the unsupported encoding exception
+     * @throws IOException
+     *             Signals that an I/O exception has occurred.
+     * @throws ClientProtocolException
+     *             the client protocol exception
+     */
+    private void createDesignDocForAggregations() throws URISyntaxException, UnsupportedEncodingException, IOException,
+            ClientProtocolException
+    {
+        HttpResponse response = null;
+        URI uri = new URI(CouchDBConstants.PROTOCOL, null, httpHost.getHostName(), httpHost.getPort(),
+                CouchDBConstants.URL_SEPARATOR + databaseName.toLowerCase() + CouchDBConstants.URL_SEPARATOR
+                        + "_design/" + CouchDBConstants.AGGREGATIONS, null, null);
+        HttpPut put = new HttpPut(uri);
+
+        CouchDBDesignDocument designDocument = new CouchDBDesignDocument();
+        Map<String, MapReduce> views = new HashMap<String, CouchDBDesignDocument.MapReduce>();
+        designDocument.setLanguage(CouchDBConstants.LANGUAGE);
+        createViewForCount(views);
+        createViewForSum(views);
+        createViewForMax(views);
+        createViewForMin(views);
+        createViewForAvg(views);
+        designDocument.setViews(views);
+        String jsonObject = gson.toJson(designDocument);
+        StringEntity entity = new StringEntity(jsonObject);
+        put.setEntity(entity);
+        try
+        {
+            response = httpClient.execute(httpHost, put, CouchDBUtils.getContext(httpHost));
+        }
+        finally
+        {
+            CouchDBUtils.closeContent(response);
+        }
+    }
+
+    /**
+     * Creates the view for select specific fields.
+     * 
+     * @param views
+     *            the views
+     */
+    private void createViewForSelectSpecificFields(Map<String, MapReduce> views)
+    {
+        if (views.get(CouchDBConstants.FIELDS) == null)
+        {
+            MapReduce mapr = new MapReduce();
+            mapr.setMap("function(doc){for(field in doc){emit(field, doc[field]);}}");
+            views.put(CouchDBConstants.FIELDS, mapr);
+        }
+    }
+
+    /**
+     * Creates the view for count.
+     * 
+     * @param views
+     *            the views
+     */
+    private void createViewForCount(Map<String, MapReduce> views)
+    {
+        if (views.get(CouchDBConstants.COUNT) == null)
+        {
+            MapReduce mapr = new MapReduce();
+            mapr.setMap("function(doc){" + "for(field in doc){if(field!=\"" + CouchDBConstants.ENTITYNAME
+                    + "\"){var o = doc[field];emit(field+\"_\"+doc." + CouchDBConstants.ENTITYNAME + ", o);" + "}}"
+                    + "emit(\"" + CouchDBConstants.ALL + "_\"+doc." + CouchDBConstants.ENTITYNAME + ", null);}");
+            mapr.setReduce("function(keys, values){return values.length;}");
+            views.put(CouchDBConstants.COUNT, mapr);
+        }
+    }
+
+    /**
+     * Creates the view for sum.
+     * 
+     * @param views
+     *            the views
+     */
+    private void createViewForSum(Map<String, MapReduce> views)
+    {
+        if (views.get(CouchDBConstants.SUM) == null)
+        {
+            MapReduce mapr = new MapReduce();
+            mapr.setMap("function(doc){for(field in doc){var o = doc[field];if(typeof(o)==\"number\")emit(field+\"_\"+doc."
+                    + CouchDBConstants.ENTITYNAME + ", o);}}");
+            mapr.setReduce("function(keys, values){return sum(values);}");
+            views.put(CouchDBConstants.SUM, mapr);
+        }
+    }
+
+    /**
+     * Creates the view for max.
+     * 
+     * @param views
+     *            the views
+     */
+    private void createViewForMax(Map<String, MapReduce> views)
+    {
+        if (views.get(CouchDBConstants.MAX) == null)
+        {
+            MapReduce mapr = new MapReduce();
+            mapr.setMap("function(doc){for(field in doc){var o = doc[field];if(typeof(o)==\"number\")emit(field+\"_\"+doc."
+                    + CouchDBConstants.ENTITYNAME + ", o);}}");
+            mapr.setReduce("function(keys, values){return Math.max.apply(Math, values);}");
+            views.put(CouchDBConstants.MAX, mapr);
+        }
+    }
+
+    /**
+     * Creates the view for min.
+     * 
+     * @param views
+     *            the views
+     */
+    private void createViewForMin(Map<String, MapReduce> views)
+    {
+        if (views.get(CouchDBConstants.MIN) == null)
+        {
+            MapReduce mapr = new MapReduce();
+            mapr.setMap("function(doc){for(field in doc){var o = doc[field];if(typeof(o)==\"number\")emit(field+\"_\"+doc."
+                    + CouchDBConstants.ENTITYNAME + ", o);}}");
+            mapr.setReduce("function(keys, values){return Math.min.apply(Math, values);}");
+            views.put(CouchDBConstants.MIN, mapr);
+        }
+    }
+
+    /**
+     * Creates the view for avg.
+     * 
+     * @param views
+     *            the views
+     */
+    private void createViewForAvg(Map<String, MapReduce> views)
+    {
+        if (views.get(CouchDBConstants.AVG) == null)
+        {
+            MapReduce mapr = new MapReduce();
+            mapr.setMap("function(doc){for(field in doc){var o = doc[field];if(typeof(o)==\"number\")emit(field+\"_\"+doc."
+                    + CouchDBConstants.ENTITYNAME + ", o);}}");
+            mapr.setReduce("function(keys, values){return sum(values)/values.length;}");
+            views.put(CouchDBConstants.AVG, mapr);
+        }
+    }
+
+    /**
      * Create database and design document.
+     * 
+     * @param tableInfos
+     *            the table infos
      */
     @Override
     protected void create_drop(List<TableInfo> tableInfos)
@@ -398,9 +601,12 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
     }
 
     /**
+     * Creates the view if not exist.
      * 
      * @param views
+     *            the views
      * @param columnName
+     *            the column name
      */
     private void createViewIfNotExist(Map<String, MapReduce> views, String columnName)
     {
@@ -411,9 +617,12 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
     }
 
     /**
+     * Creates the view.
      * 
      * @param views
+     *            the views
      * @param columnName
+     *            the column name
      */
     private void createView(Map<String, MapReduce> views, String columnName)
     {
@@ -423,9 +632,12 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
     }
 
     /**
+     * Creates the view for select all if not exist.
      * 
      * @param tableInfo
+     *            the table info
      * @param views
+     *            the views
      */
     private void createViewForSelectAllIfNotExist(TableInfo tableInfo, Map<String, MapReduce> views)
     {
@@ -436,9 +648,12 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
     }
 
     /**
+     * Creates the view for select all.
      * 
      * @param tableInfo
+     *            the table info
      * @param views
+     *            the views
      */
     private void createViewForSelectAll(TableInfo tableInfo, Map<String, MapReduce> views)
     {
@@ -448,11 +663,16 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
     }
 
     /**
+     * Creates the database if not exist.
      * 
      * @param drop
+     *            the drop
      * @throws URISyntaxException
+     *             the URI syntax exception
      * @throws IOException
+     *             Signals that an I/O exception has occurred.
      * @throws ClientProtocolException
+     *             the client protocol exception
      */
     private void createDatabaseIfNotExist(boolean drop) throws URISyntaxException, IOException, ClientProtocolException
     {
@@ -466,7 +686,7 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
         if (!exist)
         {
             URI uri = new URI(CouchDBConstants.PROTOCOL, null, httpHost.getHostName(), httpHost.getPort(),
-                    CouchDBConstants.URL_SAPRATOR + databaseName.toLowerCase(), null, null);
+                    CouchDBConstants.URL_SEPARATOR + databaseName.toLowerCase(), null, null);
 
             HttpPut put = new HttpPut(uri);
             HttpResponse putRes = null;
@@ -485,15 +705,18 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
     /**
      * Check for db existence.
      * 
-     * @return
+     * @return true, if successful
      * @throws ClientProtocolException
+     *             the client protocol exception
      * @throws IOException
+     *             Signals that an I/O exception has occurred.
      * @throws URISyntaxException
+     *             the URI syntax exception
      */
     private boolean checkForDBExistence() throws ClientProtocolException, IOException, URISyntaxException
     {
         URI uri = new URI(CouchDBConstants.PROTOCOL, null, httpHost.getHostName(), httpHost.getPort(),
-                CouchDBConstants.URL_SAPRATOR + databaseName.toLowerCase(), null, null);
+                CouchDBConstants.URL_SEPARATOR + databaseName.toLowerCase(), null, null);
 
         HttpGet get = new HttpGet(uri);
         HttpResponse getRes = null;
@@ -517,8 +740,11 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
      * Drop database.
      * 
      * @throws IOException
+     *             Signals that an I/O exception has occurred.
      * @throws ClientProtocolException
+     *             the client protocol exception
      * @throws URISyntaxException
+     *             the URI syntax exception
      */
     private void dropDatabase() throws IOException, ClientProtocolException, URISyntaxException
     {
@@ -526,7 +752,7 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
         try
         {
             URI uri = new URI(CouchDBConstants.PROTOCOL, null, httpHost.getHostName(), httpHost.getPort(),
-                    CouchDBConstants.URL_SAPRATOR + databaseName.toLowerCase(), null, null);
+                    CouchDBConstants.URL_SEPARATOR + databaseName.toLowerCase(), null, null);
             HttpDelete delete = new HttpDelete(uri);
             delRes = httpClient.execute(httpHost, delete, CouchDBUtils.getContext(httpHost));
         }
@@ -540,7 +766,8 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
      * Get design document.
      * 
      * @param id
-     * @return
+     *            the id
+     * @return the design document
      */
     private CouchDBDesignDocument getDesignDocument(String id)
     {
@@ -548,7 +775,7 @@ public class CouchDBSchemaManager extends AbstractSchemaManager implements Schem
         try
         {
             URI uri = new URI(CouchDBConstants.PROTOCOL, null, httpHost.getHostName(), httpHost.getPort(),
-                    CouchDBConstants.URL_SAPRATOR + databaseName.toLowerCase() + CouchDBConstants.URL_SAPRATOR + id,
+                    CouchDBConstants.URL_SEPARATOR + databaseName.toLowerCase() + CouchDBConstants.URL_SEPARATOR + id,
                     null, null);
             HttpGet get = new HttpGet(uri);
             get.addHeader("Accept", "application/json");
